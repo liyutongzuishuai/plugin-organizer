@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Plugin Settings Organizer",
+    "description": "Files plugin-added settings entries below the shipped ones behind a divider, and keeps up as plugins come and go."
+  }
+}
