@@ -31,12 +31,25 @@ WorkBuddy           ← 插件安装的
 
 ## 安装
 
+从 GitHub 装（推荐，随时跟进最新提交）：
+
 ```bash
-# 在 dsh 中按目录安装（profile 会建立 link，改源码后刷新页面即生效）
+dsh plugin add git+https://github.com/liyutongzuishuai/plugin-organizer.git
+```
+
+从本地目录装（开发用；profile 会建立 link，改源码后刷新页面即生效）：
+
+```bash
 dsh plugin add /path/to/plugin-organizer
 ```
 
-或在会话里用 `plugin_manager` 的 `install_bundle` 指向本目录。
+也可以在会话里用 `plugin_manager` 的 `install_bundle` 指向本目录。装好后重启/刷新 Web 页面，打开 **设置** 即可看到分区。
+
+## 兼容性
+
+- 适用于 dsh `0.2.x` 的 Web 客户端（依赖 `settings.section` 注册项上的 `registrant` 与导航容器的 flex 布局）。
+- 只在设置对话框内生效；不修改宿主 DOM，不替换任何官方组件。
+- 若宿主改变导航类名，插件不会报错，只是不再显示分区线。
 
 ## 开发与测试
 

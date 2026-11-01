@@ -1,7 +1,6 @@
 {
-  "name": "@local/plugin-organizer",
+  "name": "dsh-plugin-organizer",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -10,6 +9,8 @@
     "./icon": "./icon.svg"
   },
   "files": [
+    "README.md",
+    "LICENSE",
     "index.js",
     "client.js",
     "cordis.patch.yml",
@@ -25,5 +26,23 @@
       "immediately": true,
       "inject": []
     }
-  }
+  },
+  "description": "Files plugin-added settings entries below the shipped ones behind a divider in the dsh Web settings navigation.",
+  "license": "MIT",
+  "author": "liyutongzuishuai",
+  "homepage": "https://github.com/liyutongzuishuai/plugin-organizer#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liyutongzuishuai/plugin-organizer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/liyutongzuishuai/plugin-organizer/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "settings",
+    "navigation",
+    "ui"
+  ]
 }
