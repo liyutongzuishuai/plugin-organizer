@@ -1,5 +1,6 @@
 window.__ModuleLoader__.load({
-  id: '@local/plugin-organizer',
+  // Must equal package.json `name`: the browser module loader keys factories by it.
+  id: 'dsh-plugin-organizer',
   factory() {
     const NS = 'pluginOrganizer';
 

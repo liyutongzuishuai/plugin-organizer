@@ -11,6 +11,8 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, 'client.js'), 'utf8');
+/** The loader keys browser factories by package name; a mismatch breaks web boot. */
+const PACKAGE_NAME = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8')).name;
 
 let registered = null;
 const appends = [];
@@ -27,7 +29,9 @@ globalThis.document = documentShim;
 globalThis.window = {
   __ModuleLoader__: {
     load(spec) {
-      if (spec.id !== '@local/plugin-organizer') throw new Error('unexpected id: ' + spec.id);
+      if (spec.id !== PACKAGE_NAME) {
+        throw new Error('browser module id must equal package.json name: ' + spec.id + ' != ' + PACKAGE_NAME);
+      }
       registered = spec.factory();
     }
   }
