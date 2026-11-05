@@ -478,6 +478,20 @@ window.__ModuleLoader__.load({
       const setCollapsed = collapsedState[1];
       const panelRef = React.useRef(null);
       const titleId = React.useId();
+      // Keep the panel mounted briefly after close so it can animate out.
+      const visibleState = React.useState(open);
+      const visible = visibleState[0];
+      const setVisible = visibleState[1];
+
+      React.useEffect(() => {
+        if (open) {
+          if (!visible) setVisible(true);
+          return undefined;
+        }
+        if (!visible) return undefined;
+        const timer = setTimeout(() => setVisible(false), 180);
+        return () => clearTimeout(timer);
+      }, [open, visible]);
 
       React.useEffect(() => {
         if (!open) return undefined;
@@ -495,7 +509,7 @@ window.__ModuleLoader__.load({
         };
       }, [open, props.store]);
 
-      if (!open) return null;
+      if (!open && !visible) return null;
 
       const config = props.config();
       const all = panelRows(props.read(), config);
@@ -510,7 +524,11 @@ window.__ModuleLoader__.load({
         running += groups[i].rows.length;
       }
 
-      return h('div', { className: 'po-root', 'data-plugin-organizer-panel': 'true' },
+      return h('div', {
+        className: 'po-root',
+        'data-plugin-organizer-panel': 'true',
+        'data-closing': open ? 'false' : 'true'
+      },
         h('div', { className: 'po-mask', 'aria-hidden': 'true', onClick: () => props.store.set(false) }),
         h('div', {
           className: 'po-panel',
@@ -626,11 +644,18 @@ window.__ModuleLoader__.load({
       '.po-trigger[data-open="true"]{color:var(--dsw-alias-label-primary,#f2f2f3)}',
       '.po-trigger:focus-visible{outline:2px solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4c8dff));outline-offset:2px}',
       '.po-visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}',
+      '.po-root[data-closing="true"]{pointer-events:none}',
+      '.po-root[data-closing="true"] .po-mask{animation:po-fade-out 170ms var(--po-ease) both}',
+      '.po-root[data-closing="true"] .po-panel{animation:po-rise-out 170ms var(--po-ease) both}',
+      '.po-root[data-closing="true"] .po-card{animation:none}',
       '@keyframes po-fade{from{opacity:0}to{opacity:1}}',
+      '@keyframes po-fade-out{from{opacity:1}to{opacity:0}}',
+      '@keyframes po-rise-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(6px) scale(.99)}}',
       '@keyframes po-rise{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}',
       '@keyframes po-card{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}',
       '@media (prefers-reduced-motion: reduce){',
       '.po-mask,.po-panel,.po-card{animation:none!important}',
+      '.po-root[data-closing="true"] .po-mask,.po-root[data-closing="true"] .po-panel{animation:none!important}',
       '.po-group-body{transition:none!important}',
       '.po-card,.po-close,.po-chevron,.po-trigger{transition:none!important}',
       '.po-card:hover{transform:none}',

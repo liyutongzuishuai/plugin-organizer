@@ -407,6 +407,16 @@ const panelProps = {
   config: () => CONFIG
 };
 check('panel renders nothing while closed', OrganizerPanel({ ...panelProps, store: createOpenStore(false) }) === null);
+check('panel css animates its exit',
+  PANEL_CSS.includes('@keyframes po-rise-out') && PANEL_CSS.includes('@keyframes po-fade-out')
+  && PANEL_CSS.includes('.po-root[data-closing="true"] .po-panel'));
+check('exit animation is disabled under reduced motion',
+  PANEL_CSS.includes('.po-root[data-closing="true"] .po-mask,.po-root[data-closing="true"] .po-panel{animation:none!important}'));
+check('closing root stops receiving pointer events',
+  PANEL_CSS.includes('.po-root[data-closing="true"]{pointer-events:none}'));
+const closingTree = OrganizerPanel({ ...panelProps, store: createOpenStore(true) });
+check('open panel marks itself as not closing',
+  closingTree.props['data-closing'] === 'false', String(closingTree.props['data-closing']));
 const tree = OrganizerPanel(panelProps);
 const nodes = tags(tree);
 check('panel renders a modal dialog',

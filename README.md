@@ -72,8 +72,9 @@ https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/market/
 
 - 只读 `settings.section` 账本 + 主题令牌（每个令牌都带兜底色值，缺令牌也能看）
 - 不读取、不修改宿主编译后的样式类名；宿主改版最坏是配色不跟随，不会白屏或错位
-- 动效：遮罩淡入 180ms、面板上浮 240ms、卡片按 26ms 递增错峰入场；分组折叠用
-  `grid-template-rows` 过渡 220ms；`prefers-reduced-motion: reduce` 时全部关闭
+- 动效：遮罩淡入 180ms、面板上浮 240ms、卡片按 26ms 递增错峰入场；关闭时面板与遮罩
+  170ms 淡出后卸载（期间不再接收点击）；分组折叠用 `grid-template-rows` 过渡 220ms；
+  `prefers-reduced-motion: reduce` 时全部关闭
 - 键盘：`Esc` 关闭、打开时焦点进入面板；`role="dialog"` + `aria-modal` + 标题关联
 - 面板内改名与分组复用 `nav-config.json` 的 `rename` / `grouping`，被提升的入口显示「已归入官方」标记
 
