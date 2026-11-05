@@ -8,7 +8,9 @@
  * The expected browser behaviour for `order` and for pseudo-elements was
  * measured in a local reproduction of the host's real nav CSS.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, copyFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -219,6 +221,54 @@ slotSubs[0].fn();
 check('a newly installed plugin re-plans the sheet',
   appends[0].textContent.includes('插件提供 · 11'),
   String(appends[0].textContent.split('\n').length) + ' rules');
+
+console.log('\n8) config CLI (scripts/nav.mjs)');
+const sandbox = mkdtempSync(join(tmpdir(), 'nav-cli-'));
+const sandboxConfig = join(sandbox, 'nav-config.json');
+const sandboxClient = join(sandbox, 'client.js');
+copyFileSync(join(here, 'nav-config.json'), sandboxConfig);
+copyFileSync(join(here, 'client.js'), sandboxClient);
+const nav = (...args) => execFileSync(process.execPath, [join(here, 'scripts', 'nav.mjs'), ...args,
+  '--config', sandboxConfig, '--client', sandboxClient], { encoding: 'utf8' });
+const readSandbox = () => JSON.parse(readFileSync(sandboxConfig, 'utf8'));
+try {
+  nav('assign', 'pet', 'ui');
+  check('assign records the category', readSandbox().grouping.assign.pet === 'ui');
+  nav('rename', 'dsh-usage', '用量统计');
+  check('rename keeps the whole name', readSandbox().rename['dsh-usage'] === '用量统计',
+    JSON.stringify(readSandbox().rename));
+  nav('rename', 'pet', '萌 宠');
+  check('rename keeps spaces inside the name', readSandbox().rename.pet === '萌 宠',
+    JSON.stringify(readSandbox().rename));
+  nav('official', 'workbuddy-ai');
+  check('official adds to the promoted list', readSandbox().official.includes('workbuddy-ai'));
+  nav('unofficial', 'workbuddy-ai');
+  check('unofficial removes it', readSandbox().official.length === 0);
+  nav('label', 'ui', '外观与界面');
+  check('label renames the group caption', readSandbox().grouping.labels.ui === '外观与界面');
+  nav('order', 'tools,ui');
+  check('order rewrites group order', readSandbox().grouping.order.join(',') === 'tools,ui');
+  nav('grouping', 'off');
+  check('grouping can be toggled off', readSandbox().grouping.enabled === false);
+  nav('grouping', 'on');
+  check('grouping can be toggled back on', readSandbox().grouping.enabled === true);
+  const baked = readFileSync(sandboxClient, 'utf8');
+  check('every edit is baked into the client', baked.includes('外观与界面') && baked.includes('萌 宠'));
+  execFileSync(process.execPath, [join(here, 'scripts', 'build-config.mjs'),
+    '--check', '--config', sandboxConfig, '--client', sandboxClient], { encoding: 'utf8' });
+  check('baked client passes --check', true);
+  writeFileSync(sandboxConfig, JSON.stringify({ ...readSandbox(), rename: { pet: 'x' } }, null, 2));
+  let drift = false;
+  try {
+    execFileSync(process.execPath, [join(here, 'scripts', 'build-config.mjs'),
+      '--check', '--config', sandboxConfig, '--client', sandboxClient], { stdio: 'pipe' });
+  } catch (error) {
+    drift = true;
+  }
+  check('--check detects drift after a manual edit', drift);
+} finally {
+  rmSync(sandbox, { recursive: true, force: true });
+}
 
 console.log('');
 if (failures > 0) {

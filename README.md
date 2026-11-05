@@ -67,14 +67,22 @@ https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/market/
 
 ## 配置：分组 / 重命名 / 当成官方
 
-编辑仓库根目录的 `nav-config.json`，然后把它烧进客户端：
+用命令行改，一条命令同时写入配置并烘焙进客户端，**刷新页面即生效**：
 
 ```bash
-node scripts/build-config.mjs          # 写入 client.js
-node scripts/build-config.mjs --check  # 校验是否同步（CI 用）
+node scripts/nav.mjs official workbuddy-ai     # 把某条第三方入口提到官方区
+node scripts/nav.mjs rename dsh-usage 用量统计   # 改名
+node scripts/nav.mjs assign pet settings        # 指定分组（section id 或包名）
+node scripts/nav.mjs label settings 设置入口      # 改分组标题
+node scripts/nav.mjs order ui,settings,tools    # 调整分组顺序
+node scripts/nav.mjs grouping off               # 关掉分组
+node scripts/nav.mjs show                       # 看当前配置
 ```
 
-刷新页面即生效。三个字段：
+`unassign` / `unrename` / `unofficial` 是对应的撤销命令。也可以直接编辑仓库根的
+`nav-config.json`，再执行 `node scripts/build-config.mjs` 烘焙、`--check` 校验同步。
+
+三个字段：
 
 ```jsonc
 {
