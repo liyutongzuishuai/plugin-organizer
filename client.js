@@ -52,7 +52,10 @@ window.__ModuleLoader__.load({
         "assign": {}
       },
       "rename": {},
-      "official": []
+      "official": [],
+      "nav": {
+        "banded": true
+      }
     };
     /* BAKED-CONFIG-END */
 
@@ -122,6 +125,7 @@ window.__ModuleLoader__.load({
       const safe = override === undefined || override === null ? {} : override;
       return {
         grouping: Object.assign({}, base.grouping, safe.grouping),
+        nav: Object.assign({}, base.nav, safe.nav),
         rename: Object.assign({}, base.rename, safe.rename),
         official: Array.isArray(safe.official) ? safe.official : base.official
       };
@@ -222,7 +226,8 @@ window.__ModuleLoader__.load({
         firstThirdPartyPosition: firstThirdPartyPosition,
         thirdPartyCount: thirdPartyCount,
         promotedCount: promotedCount,
-        groupingEnabled: grouping.enabled !== false
+        groupingEnabled: grouping.enabled !== false,
+        navBanded: !(cfg.nav !== undefined && cfg.nav !== null && cfg.nav.banded === false)
       };
     }
 
@@ -253,6 +258,9 @@ window.__ModuleLoader__.load({
      */
     function buildCss(plan, headerLabel, labels) {
       if (plan === undefined || plan.thirdPartyCount === 0) return '';
+      // The navigation layer is the fragile one (host class names); it can be
+      // switched off entirely, leaving only the standalone panel.
+      if (plan.navBanded === false) return '';
       const list = '[data-shortcut-modal="settings"] [class*="navList"]';
       const children = list + '>*';
       const at = (position) => children + ':nth-child(' + String(position) + ')';

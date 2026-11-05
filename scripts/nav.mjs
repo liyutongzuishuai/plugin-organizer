@@ -7,6 +7,7 @@
  *
  *   node scripts/nav.mjs show
  *   node scripts/nav.mjs grouping on|off
+ *   node scripts/nav.mjs nav on|off                       # in-navigation band split
  *   node scripts/nav.mjs assign <section-id|package> <category>
  *   node scripts/nav.mjs unassign <section-id|package>
  *   node scripts/nav.mjs rename <section-id|package> <display name>
@@ -57,6 +58,8 @@ function load() {
   parsed.grouping.order = Array.isArray(parsed.grouping.order) ? parsed.grouping.order : [];
   parsed.grouping.labels = parsed.grouping.labels ?? {};
   parsed.grouping.assign = parsed.grouping.assign ?? {};
+  parsed.nav = parsed.nav ?? {};
+  if (parsed.nav.banded === undefined) parsed.nav.banded = true;
   parsed.rename = parsed.rename ?? {};
   parsed.official = Array.isArray(parsed.official) ? parsed.official : [];
   return parsed;
@@ -99,6 +102,14 @@ switch (command) {
     config.grouping.enabled = value === 'on';
     changed = true;
     console.log('grouping ' + value);
+    break;
+  }
+  case 'nav': {
+    const value = need(rest[0], 'on|off');
+    if (value !== 'on' && value !== 'off') throw new Error('nav expects on or off');
+    config.nav.banded = value === 'on';
+    changed = true;
+    console.log('navigation band split ' + value);
     break;
   }
   case 'assign': {
@@ -167,7 +178,7 @@ switch (command) {
     break;
   }
   default: {
-    console.error('usage: node scripts/nav.mjs <show|grouping|assign|unassign|rename|unrename|official|unofficial|label|order> [args]');
+    console.error('usage: node scripts/nav.mjs <show|nav|grouping|assign|unassign|rename|unrename|official|unofficial|label|order> [args]');
     process.exit(2);
   }
 }

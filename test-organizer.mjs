@@ -160,6 +160,11 @@ const patched = mergeConfig(CONFIG, { grouping: { enabled: false } });
 const ungrouped = planNav(FIXTURE, patched);
 check('grouping can be switched off', ungrouped.groupingEnabled === false);
 const ungroupedCss = buildCss(ungrouped, '插件提供 · 10', {});
+check('the navigation layer can be switched off',
+  buildCss(planNav(FIXTURE, mergeConfig(CONFIG, { nav: { banded: false } })), 'x', {}) === '');
+check('the navigation layer is on by default',
+  buildCss(planNav(FIXTURE, CONFIG), 'x', {}).length > 0
+  && planNav(FIXTURE, CONFIG).navBanded === true);
 check('no sub-captions when grouping is off',
   ungroupedCss.split('\n').filter((line) => line.includes('::before')).length === 1);
 
@@ -289,6 +294,10 @@ try {
   check('label renames the group caption', readSandbox().grouping.labels.ui === '外观与界面');
   nav('order', 'tools,ui');
   check('order rewrites group order', readSandbox().grouping.order.join(',') === 'tools,ui');
+  nav('nav', 'off');
+  check('nav switch turns the band split off', readSandbox().nav.banded === false);
+  nav('nav', 'on');
+  check('nav switch turns it back on', readSandbox().nav.banded === true);
   nav('grouping', 'off');
   check('grouping can be toggled off', readSandbox().grouping.enabled === false);
   nav('grouping', 'on');

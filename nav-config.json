@@ -2,7 +2,20 @@
   "$schema": "dsh-plugin-organizer/nav-config@1",
   "grouping": {
     "enabled": true,
-    "order": ["ui", "settings", "sidebar", "session", "tools", "llm", "exec", "storage", "api", "host", "experimental", "other"],
+    "order": [
+      "ui",
+      "settings",
+      "sidebar",
+      "session",
+      "tools",
+      "llm",
+      "exec",
+      "storage",
+      "api",
+      "host",
+      "experimental",
+      "other"
+    ],
     "labels": {
       "ui": "界面",
       "settings": "设置页",
@@ -20,5 +33,8 @@
     "assign": {}
   },
   "rename": {},
-  "official": []
+  "official": [],
+  "nav": {
+    "banded": true
+  }
 }

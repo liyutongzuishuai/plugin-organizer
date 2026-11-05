@@ -94,13 +94,17 @@ node scripts/nav.mjs grouping off               # 关掉分组
 node scripts/nav.mjs show                       # 看当前配置
 ```
 
-`unassign` / `unrename` / `unofficial` 是对应的撤销命令。也可以直接编辑仓库根的
+`unassign` / `unrename` / `unofficial` 是对应的撤销命令。
+
+另外可用 `node scripts/nav.mjs nav off` 关掉**导航内的分区改写**——那一层依赖宿主类名，
+是最薄弱的部分；关掉后只保留完全独立的面板。默认开启。也可以直接编辑仓库根的
 `nav-config.json`，再执行 `node scripts/build-config.mjs` 烘焙、`--check` 校验同步。
 
 三个字段：
 
 ```jsonc
 {
+  "nav": { "banded": true },     // false = 不再改写导航，只用面板
   "grouping": {
     "enabled": true,              // false = 插件区不再按类分组
     "order": ["ui", "settings"],  // 分组顺序
