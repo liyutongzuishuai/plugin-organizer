@@ -51,6 +51,20 @@ dsh plugin add /path/to/plugin-organizer
 - 只在设置对话框内生效；不修改宿主 DOM，不替换任何官方组件。
 - 若宿主改变导航类名，插件不会报错，只是不再显示分区线。
 
+## 加入插件市场索引
+
+本仓库自带一份 format 1 市场索引：[`market/index.json`](market/index.json)。在 dsh 里打开
+**插件 → 发现（Discover）→ 添加索引源**，填入：
+
+```
+https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/market/index.json
+```
+
+即可在市场里搜到并以锁定 commit 的方式安装。该文件用
+`@deepseek-ai/dsh-plugin-market-index` 的 `parseMarketIndex` 校验通过。
+
+同一插件也已提交到社区精选列表 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)（条目文件 `data/plugins/liyutongzuishuai__plugin-organizer.yml`）。
+
 ## 开发与测试
 
 ```bash

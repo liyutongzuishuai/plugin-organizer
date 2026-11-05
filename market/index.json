@@ -1,0 +1,68 @@
+{
+  "format": 1,
+  "title": {
+    "en": "liyutongzuishuai plugins",
+    "zh": "liyutongzuishuai 插件"
+  },
+  "description": {
+    "en": "Plugins published by liyutongzuishuai for DeepSeek Harness.",
+    "zh": "liyutongzuishuai 发布的 DeepSeek Harness 插件。"
+  },
+  "metadata": {
+    "categories": {
+      "ui": {
+        "title": {
+          "en": "Interface",
+          "zh": "界面"
+        }
+      }
+    },
+    "labels": {},
+    "sortKeys": {}
+  },
+  "plugins": [
+    {
+      "name": "dsh-plugin-organizer",
+      "title": {
+        "en": "Plugin Settings Organizer",
+        "zh": "插件设置收纳"
+      },
+      "description": {
+        "en": "Groups the settings navigation into two bands: entries shipped with dsh stay on top, entries registered by installed plugins move below them behind a divider with a live count. Re-plans automatically as plugins come and go.",
+        "zh": "把设置导航分成两组：dsh 自带的入口在上，已安装插件注册的入口在下，中间用带实时计数的分割线分开；插件增减时自动重排。"
+      },
+      "icon": "https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/icon.svg",
+      "author": "liyutongzuishuai",
+      "homepage": "https://github.com/liyutongzuishuai/plugin-organizer#readme",
+      "repository": {
+        "url": "https://github.com/liyutongzuishuai/plugin-organizer"
+      },
+      "metadata": {
+        "category": "ui",
+        "keywords": [
+          "dsh",
+          "dsh-plugin",
+          "settings",
+          "navigation",
+          "ui"
+        ],
+        "labels": [],
+        "sortKeys": {}
+      },
+      "versions": [
+        {
+          "version": "1.0.1",
+          "publishTimestamp": 1793508838,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/liyutongzuishuai/plugin-organizer",
+            "commit": "94c7f99d7019926e65d56da01da0327068316fd5"
+          },
+          "engines": {
+            "dsh": "^0.2.0-0"
+          }
+        }
+      ]
+    }
+  ]
+}
