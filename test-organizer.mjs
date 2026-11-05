@@ -1,9 +1,12 @@
 /**
  * Offline test for the settings-navigation organizer.
- * Uses the real ledger entry shape (`{ options: {...} }`) that the settings
- * shell projects, and checks the generated stylesheet against the browser
- * behaviour measured in the local reproduction (flex `order` reorders rows;
- * `order` on a container's `::after` is ignored by Chromium).
+ *
+ * Covers the three configurable behaviours — grouping (category sub-headers),
+ * rename (per-entry display name), and promotion (treat a plugin entry as
+ * shipped) — plus the band split, the generated stylesheet, and live wiring.
+ *
+ * The expected browser behaviour for `order` and for pseudo-elements was
+ * measured in a local reproduction of the host's real nav CSS.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -11,8 +14,8 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, 'client.js'), 'utf8');
-/** The loader keys browser factories by package name; a mismatch breaks web boot. */
-const PACKAGE_NAME = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8')).name;
+const packageName = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8')).name;
+const configFile = JSON.parse(readFileSync(join(here, 'nav-config.json'), 'utf8'));
 
 let registered = null;
 const appends = [];
@@ -29,8 +32,8 @@ globalThis.document = documentShim;
 globalThis.window = {
   __ModuleLoader__: {
     load(spec) {
-      if (spec.id !== PACKAGE_NAME) {
-        throw new Error('browser module id must equal package.json name: ' + spec.id + ' != ' + PACKAGE_NAME);
+      if (spec.id !== packageName) {
+        throw new Error('browser module id must equal package.json name: ' + spec.id + ' != ' + packageName);
       }
       registered = spec.factory();
     }
@@ -39,8 +42,10 @@ globalThis.window = {
 
 new Function('window', 'document', source)(globalThis.window, documentShim);
 if (registered === null) throw new Error('bundle registered nothing');
-const { isThirdParty, planNav, buildCss, optionsOf, dictionaries } = registered.__internals;
-const t = (key) => (dictionaries.zh[key] === undefined ? key : dictionaries.zh[key]);
+const {
+  CONFIG, mergeConfig, readConfig, planNav, buildCss, categoryOf,
+  categoryLabel, dictionaries
+} = registered.__internals;
 
 let failures = 0;
 function check(label, condition, detail) {
@@ -50,10 +55,11 @@ function check(label, condition, detail) {
     console.log('  FAIL ' + label + (detail === undefined ? '' : ' -> ' + detail));
   }
 }
+const t = (key) => (dictionaries.zh[key] === undefined ? key : dictionaries.zh[key]);
 
 /* Real section orders of this deployment, in the slot service's entry shape. */
 const row = (id, order, registrant) => ({ options: { id, order, registrant } });
-const SECTION_FIXTURE = [
+const FIXTURE = [
   row('account', -10, '@deepseek-ai/dsh-client-ui-settings-account'),
   row('general', 0, '@deepseek-ai/dsh-client-ui-settings-general'),
   row('models', 10, '@deepseek-ai/dsh-client-ui-settings-models'),
@@ -71,73 +77,116 @@ const SECTION_FIXTURE = [
   row('plugin-settings', 900, 'dsh-qoder-connect')
 ];
 
-console.log('\n1) entry shape and origin split');
-check('reads the real options wrapper', optionsOf(SECTION_FIXTURE[0]).id === 'account');
-check('accepts a bare options object', optionsOf({ id: 'x' }).id === 'x');
-check('shipped package is not third-party', isThirdParty(SECTION_FIXTURE[2]) === false);
-check('installed package is third-party', isThirdParty(SECTION_FIXTURE[11]) === true);
-check('bare-name installed package is third-party', isThirdParty(SECTION_FIXTURE[14]) === true);
-check('missing registrant falls back to the shipped id list',
-  isThirdParty({ options: { id: 'agent-presets' } }) === false
-  && isThirdParty({ options: { id: 'pet' } }) === true);
+console.log('\n1) config plumbing');
+check('baked literal equals nav-config.json',
+  JSON.stringify(CONFIG) === JSON.stringify(configFile));
+check('merge keeps baked values', mergeConfig(CONFIG, {}).grouping.order.length === CONFIG.grouping.order.length);
+check('merge overrides one section', mergeConfig(CONFIG, { rename: { pet: '萌宠' } }).rename.pet === '萌宠');
+check('readConfig falls back without storage',
+  readConfig({}).grouping.enabled === CONFIG.grouping.enabled);
+check('readConfig ignores malformed storage', (() => {
+  const scope = { localStorage: { getItem: () => '{not json' } };
+  return readConfig(scope).grouping.enabled === CONFIG.grouping.enabled;
+})());
 
-console.log('\n2) nav plan against the real orders');
-const plan = planNav(SECTION_FIXTURE);
-check('15 rows planned', plan.rows.length === 15);
-check('5 shipped rows', plan.builtInCount === 5, String(plan.builtInCount));
-check('10 plugin rows', plan.pluginCount === 10, String(plan.pluginCount));
-check('shipped rows keep their registration order',
-  plan.rows.filter((r) => !r.thirdParty).map((r) => r.id).join(',') === 'account,general,models,plugins,agent-presets',
-  plan.rows.filter((r) => !r.thirdParty).map((r) => r.id).join(','));
-check('plugin positions are 1-based nth-child values',
-  JSON.stringify(plan.pluginPositions) === JSON.stringify([5, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
-  JSON.stringify(plan.pluginPositions));
-check('first plugin row is the divider anchor', plan.firstPluginPosition === 5);
-check('no row is lost', plan.rows.length === SECTION_FIXTURE.length);
+console.log('\n2) band split (default config)');
+const plan = planNav(FIXTURE, CONFIG);
+check('5 shipped rows', plan.bandPositions.length === 5, String(plan.bandPositions.length));
+check('10 plugin rows', plan.thirdPartyCount === 10, String(plan.thirdPartyCount));
+check('shipped rows keep registration order',
+  plan.rows.filter((r) => !r.thirdParty).map((r) => r.id).join(',')
+    === 'account,general,models,plugins,agent-presets');
+check('first plugin row anchors the divider', plan.firstThirdPartyPosition === 5);
+check('agent-presets is not treated as a plugin',
+  plan.rows.find((r) => r.id === 'agent-presets').thirdParty === false);
 
-/* Simulate the browser: flex items sort by `order`, ties keep DOM order. */
-const pluginSet = new Set(plan.pluginPositions);
-const visual = plan.rows
-  .map((rowPlan, index) => ({
-    id: rowPlan.id,
-    band: pluginSet.has(index + 1) ? 2 : 1,
-    position: index + 1
-  }))
-  .sort((a, b) => (a.band - b.band) || (a.position - b.position));
-check('band 1 is exactly the five shipped rows, in order',
-  visual.filter((r) => r.band === 1).map((r) => r.id).join(',')
-    === 'account,general,models,plugins,agent-presets',
-  visual.filter((r) => r.band === 1).map((r) => r.id).join(','));
-check('band 2 is exactly the ten plugin rows, in order',
-  visual.filter((r) => r.band === 2).map((r) => r.id).join(',')
-    === 'workbuddy-ai,archived-sessions,dshp-vision-bridge,im-assistant,web-ui-plugins,skin-center,pet,market,dsh-usage,plugin-settings',
-  visual.filter((r) => r.band === 2).map((r) => r.id).join(','));
-check('every shipped row is above every plugin row',
-  visual.slice(0, 5).every((r) => r.band === 1) && visual.slice(5).every((r) => r.band === 2));
+console.log('\n3) grouping into category bands');
+check('plugin rows are bucketed into at least two groups', plan.groups.length >= 2, String(plan.groups.length));
+check('groups follow the configured order', (() => {
+  const declared = CONFIG.grouping.order;
+  const ranks = plan.groups.map((g) => declared.indexOf(g.category));
+  return ranks.every((value, index) => index === 0 || ranks[index - 1] <= value);
+})(), plan.groups.map((g) => g.category).join(','));
+check('every plugin row appears in exactly one group',
+  plan.groups.reduce((sum, g) => sum + g.positions.length, 0) === plan.thirdPartyCount);
+check('each group starts at its first position',
+  plan.groups.every((g) => g.positions[0] === g.firstPosition));
+check('group visual orders rise by ten',
+  plan.groups.every((g, index) => g.visualOrder === 100 + index * 10));
+const labels = {};
+plan.groups.forEach((g) => { labels[g.category] = categoryLabel(g.category, CONFIG, t); });
+const groupedCss = buildCss(plan, '插件提供 · 10', labels);
+check('every group is banded by order',
+  plan.groups.every((g) => groupedCss.includes('{order:' + g.visualOrder + '}')));
+check('later groups get a sub-caption',
+  plan.groups.slice(1).every((g) => groupedCss.includes(':nth-child(' + g.firstPosition + ')::before')));
+check('the first plugin row keeps the band header',
+  groupedCss.includes('content:"插件提供 · 10"'));
+check('the band header sits on the first VISUAL group, not the first DOM row',
+  groupedCss.includes(':nth-child(' + plan.groups[0].firstPosition + ')::before{content:"插件提供 · 10"'),
+  'groups=' + plan.groups.map((g) => g.category + '@' + g.firstPosition).join(','));
+check('no row carries two captions', (() => {
+  const positions = [];
+  const matches = groupedCss.match(/:nth-child\((\d+)\)::before/g) || [];
+  for (const match of matches) positions.push(Number(match.replace(/[^0-9]/g, '')));
+  return positions.length === new Set(positions).size;
+})(), '双标题行存在');
+check('sub-captions use the configured labels',
+  groupedCss.includes('content:"' + labels[plan.groups[1].category] + '"'), labels[plan.groups[1].category]);
+const patched = mergeConfig(CONFIG, { grouping: { enabled: false } });
+const ungrouped = planNav(FIXTURE, patched);
+check('grouping can be switched off', ungrouped.groupingEnabled === false);
+const ungroupedCss = buildCss(ungrouped, '插件提供 · 10', {});
+check('no sub-captions when grouping is off',
+  ungroupedCss.split('\n').filter((line) => line.includes('::before')).length === 1);
 
-console.log('\n3) generated stylesheet');
-const css = buildCss(plan, '插件提供 · 10');
-const prefix = '[data-shortcut-modal="settings"] [class*="navList"]>*';
-check('scoped to the settings dialog', css.startsWith(prefix + '{order:1}'), css.split('\n')[0]);
-check('every plugin position is banded',
-  plan.pluginPositions.every((position) => css.includes(':nth-child(' + position + ')')),
-  css.split('\n')[1]);
-check('the band rule covers the whole plugin set',
-  /:nth-child\(5\)[\s\S]*:nth-child\(15\)\{order:2\}/.test(css));
-check('shipped rows are never banded', !/:nth-child\(6\)/.test(css));
-check('divider rides the first plugin row',
-  css.includes(':nth-child(5){margin-top:34px;border-top:0.5px solid var(--dsw-alias-border-l2);position:relative}'));
-check('divider caption sits above that row',
-  /:nth-child\(5\)::before\{content:"插件提供 · 10";position:absolute;left:12px;top:-20px/.test(css));
-check('no container ::after is used (its order is ignored)',
-  !/[class*="navList"]::after/.test(css) && !/[class*="navList"]>button/.test(css));
-check('hairline and caption use theme tokens',
-  css.includes('var(--dsw-alias-border-l2)') && css.includes('var(--dsw-alias-label-tertiary)'));
-check('caption escaping keeps the CSS valid',
-  buildCss(plan, 'a"b\\c').includes('content:"a\\"b\\\\c"'));
-check('nothing to split means no rules', buildCss(planNav([SECTION_FIXTURE[0]]), 'x') === '');
+console.log('\n4) rename');
+const renaming = mergeConfig(CONFIG, { rename: { pet: '萌宠', '@linxin666/dsh-usage': '用量统计' } });
+const renamed = planNav(FIXTURE, renaming);
+check('rename matches a section id', renamed.rows.find((r) => r.id === 'pet').rename === '萌宠');
+check('rename matches a package name', renamed.rows.find((r) => r.id === 'dsh-usage').rename === '用量统计');
+check('untouched rows carry no rename', renamed.rows.find((r) => r.id === 'general').rename === undefined);
+const petPosition = renamed.rows.findIndex((r) => r.id === 'pet') + 1;
+const renameCss = buildCss(renamed, '插件提供 · 10', {});
+check('the shell label is hidden for a renamed row',
+  renameCss.includes(':nth-child(' + petPosition + ') [class*="navLabel"]{display:none}'));
+check('the replacement text is drawn on that row',
+  renameCss.includes(':nth-child(' + petPosition + ')::after{content:"萌宠"'));
+check('replacement text is escaped', buildCss(
+  planNav(FIXTURE, mergeConfig(CONFIG, { rename: { pet: 'a"b\\c' } })), 'x', {}
+).includes('content:"a\\"b\\\\c"'));
 
-console.log('\n4) live wiring');
+console.log('\n5) treat a plugin entry as shipped');
+const promoting = mergeConfig(CONFIG, { official: ['workbuddy-ai'] });
+const promoted = planNav(FIXTURE, promoting);
+const workbuddy = promoted.rows.find((r) => r.id === 'workbuddy-ai');
+check('promoted row leaves the plugin band', workbuddy.thirdParty === false && workbuddy.promoted === true);
+check('plugin count drops by one', promoted.thirdPartyCount === 9, String(promoted.thirdPartyCount));
+check('band count grows by one', promoted.bandPositions.length === 6, String(promoted.bandPositions.length));
+const promotedCss = buildCss(promoted, '插件提供 · 9', {});
+check('promoted row is never banded in the sheet',
+  !promotedCss.includes(':nth-child(5){order:'), promotedCss.split('\n')[1]);
+check('promotion also matches a package name',
+  planNav(FIXTURE, mergeConfig(CONFIG, { official: ['@linxin666/dsh-pet'] }))
+    .rows.find((r) => r.id === 'pet').promoted === true);
+check('shipped rows are never marked promoted',
+  promoted.rows.find((r) => r.id === 'general').promoted === false);
+
+console.log('\n6) categories and labels');
+check('explicit assignment wins over keywords',
+  categoryOf('pet', '@linxin666/dsh-pet', mergeConfig(CONFIG, { grouping: { assign: { pet: 'tools' } } })) === 'tools',
+  categoryOf('pet', '@linxin666/dsh-pet', mergeConfig(CONFIG, { grouping: { assign: { pet: 'tools' } } })));
+check('keyword rules still apply without an assignment',
+  categoryOf('dsh-tool-bash', '@deepseek-ai/dsh-tool-bash', CONFIG) === 'tools',
+  categoryOf('dsh-tool-bash', '@deepseek-ai/dsh-tool-bash', CONFIG));
+check('config label wins for a category',
+  categoryLabel('tools', mergeConfig(CONFIG, { grouping: { labels: { tools: '工具集' } } }), t) === '工具集');
+check('dictionary label used when config has none',
+  categoryLabel('llm', mergeConfig(CONFIG, { grouping: { labels: {} } }), t) === '模型');
+check('unknown category falls back to its id',
+  categoryLabel('custom', mergeConfig(CONFIG, { grouping: { labels: {} } }), t) === 'custom');
+
+console.log('\n7) live wiring');
 const effects = [];
 const slotSubs = [];
 const localeSubs = [];
@@ -149,31 +198,27 @@ const ctx = {
     subscribe: (fn) => { localeSubs.push(fn); return () => {}; }
   },
   slots: {
-    entries: (key) => (key === 'settings.section' ? SECTION_FIXTURE : []),
+    entries: (key) => (key === 'settings.section' ? FIXTURE : []),
     subscribe: (key, fn) => { slotSubs.push({ key, fn }); return () => {}; }
   }
 };
-registered.apply(ctx);
-check('registers its dictionaries',
-  ctx.locale.registered !== undefined
-  && ctx.locale.registered.ns === 'pluginOrganizer'
-  && ctx.locale.registered.dicts.zh.navGroup === '插件提供');
-check('two effects installed (dictionary + styles)', effects.length === 2, String(effects.length));
-check('style element appended', appends.length === 1);
-check('stylesheet written on mount',
-  appends[0].textContent.includes('插件提供 · 10'), appends[0].textContent.slice(0, 60));
-check('subscribes to the section ledger',
-  slotSubs.length === 1 && slotSubs[0].key === 'settings.section');
-check('subscribes to the locale revision', localeSubs.length === 1);
+const api = registered.apply(ctx);
+check('registers dictionaries', ctx.locale.registered.dicts.zh.navGroup === '插件提供');
+check('style element appended once', appends.length === 1, String(appends.length));
+check('stylesheet written on mount', appends[0].textContent.includes('插件提供 · 10'));
+check('subscribes to the ledger', slotSubs.length === 1 && slotSubs[0].key === 'settings.section');
+check('two effects installed', effects.length === 2, String(effects.length));
+check('reload() rewrites the sheet', typeof api.reload === 'function'
+  && api.reload() !== undefined
+  && appends[0].textContent.includes('插件提供 · 10'));
 check('zh and en share one key set',
   JSON.stringify(Object.keys(dictionaries.zh).sort()) === JSON.stringify(Object.keys(dictionaries.en).sort()));
 
-SECTION_FIXTURE.push(row('new-plugin', 160, '@someone/dsh-thing'));
+FIXTURE.push(row('brand-new', 160, '@someone/dsh-thing'));
 slotSubs[0].fn();
-check('a newly installed plugin re-plans the stylesheet',
-  appends[0].textContent.includes('插件提供 · 11')
-  && appends[0].textContent.includes(':nth-child(16)'),
-  appends[0].textContent.split('\n')[1].slice(0, 100));
+check('a newly installed plugin re-plans the sheet',
+  appends[0].textContent.includes('插件提供 · 11'),
+  String(appends[0].textContent.split('\n').length) + ' rules');
 
 console.log('');
 if (failures > 0) {

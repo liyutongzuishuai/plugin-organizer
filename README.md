@@ -65,11 +65,54 @@ https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/market/
 
 同一插件也已提交到社区精选列表 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)（条目文件 `data/plugins/liyutongzuishuai__plugin-organizer.yml`）。
 
+## 配置：分组 / 重命名 / 当成官方
+
+编辑仓库根目录的 `nav-config.json`，然后把它烧进客户端：
+
+```bash
+node scripts/build-config.mjs          # 写入 client.js
+node scripts/build-config.mjs --check  # 校验是否同步（CI 用）
+```
+
+刷新页面即生效。三个字段：
+
+```jsonc
+{
+  "grouping": {
+    "enabled": true,              // false = 插件区不再按类分组
+    "order": ["ui", "settings"],  // 分组顺序
+    "labels": { "ui": "界面" },    // 分组标题（不写则用内置中英文字典）
+    "assign": { "pet": "ui" }     // 强制某个入口归到某组（填 section id 或包名）
+  },
+  "rename": {
+    "dsh-usage": "用量统计"        // 显示名替换（section id 或包名均可）
+  },
+  "official": [
+    "workbuddy-ai"                // 当成官方：把这条入口提到分割线以上
+  ]
+}
+```
+
+- **分组**：插件区内部再按类别分组，每组首行上方显示组名；组内保持插件自己的注册顺序。
+- **重命名**：隐藏宿主原本的标签，按配置绘制新名字，只影响显示。
+- **当成官方**：被列出的入口按官方规则排序（`order: 1`），出现在分割线上方的官方带里，计数随之减少。
+
+临时试验可以不改文件，直接把覆盖写进浏览器：
+
+```js
+localStorage.setItem('dsh-plugin-organizer:config',
+  JSON.stringify({ grouping: { enabled: false } }));
+// 想撤销：localStorage.removeItem('dsh-plugin-organizer:config')
+```
+
+`localStorage` 覆盖只合并 `grouping` / `rename` / `official` 三项，刷新页面生效；写坏 JSON 会被忽略，不会影响设置面板。
+
 ## 开发与测试
 
 ```bash
 node --check client.js
-node test-organizer.mjs      # 40 项断言：来源判定、位次、视觉分组、样式内容、自动重算
+node scripts/build-config.mjs --check   # 配置与 client.js 是否同步
+node test-organizer.mjs                 # 分组 / 重命名 / 提升 / 样式 / 自动重算
 ```
 
 主要文件：

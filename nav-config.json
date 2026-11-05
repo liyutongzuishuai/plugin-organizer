@@ -1,0 +1,24 @@
+{
+  "$schema": "dsh-plugin-organizer/nav-config@1",
+  "grouping": {
+    "enabled": true,
+    "order": ["ui", "settings", "sidebar", "session", "tools", "llm", "exec", "storage", "api", "host", "experimental", "other"],
+    "labels": {
+      "ui": "界面",
+      "settings": "设置页",
+      "sidebar": "侧栏",
+      "session": "会话",
+      "tools": "工具",
+      "llm": "模型",
+      "exec": "执行",
+      "storage": "存储",
+      "api": "接口",
+      "host": "宿主",
+      "experimental": "实验",
+      "other": "其他"
+    },
+    "assign": {}
+  },
+  "rename": {},
+  "official": []
+}
