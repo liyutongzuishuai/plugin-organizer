@@ -51,12 +51,12 @@
       },
       "versions": [
         {
-          "version": "1.3.1",
-          "publishTimestamp": 1793886645,
+          "version": "1.4.0",
+          "publishTimestamp": 1793886846,
           "source": {
             "type": "git",
             "url": "https://github.com/liyutongzuishuai/plugin-organizer",
-            "commit": "596944989e2038cfc8ea4d3aba26109de8d68c3d"
+            "commit": "776377764ad021d7aab119e01492afc7b13cef8e"
           },
           "engines": {
             "dsh": "^0.2.0-0"
