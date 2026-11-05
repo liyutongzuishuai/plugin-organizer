@@ -69,7 +69,8 @@ const {
   categoryLabel, dictionaries, createOpenStore, panelRows, panelGroups,
   filterPanelRows, PanelTrigger, OrganizerPanel, PANEL_CSS,
   clampPanelPosition, readPanelPosition, writePanelPosition, clearPanelPosition,
-  PANEL_POSITION_KEY
+  PANEL_POSITION_KEY, reorderIds, positionsForOrder, dropIndexAt, writePositionOverride,
+  readOverride
 } = registered.__internals;
 
 let failures = 0;
@@ -222,10 +223,16 @@ check('without overrides every group keeps registration order',
     || group.rows[index - 1].registeredAt <= row.registeredAt)));
 
 const positionedPanel = panelRows(FIXTURE, mergeConfig(CONFIG, { position: { pet: 1 } }));
-check('the panel lists rows in the navigation order',
+check('the panel shows the arranged order inside a category',
   positionedPanel.findIndex((row) => row.id === 'pet')
-    < positionedPanel.findIndex((row) => row.id === 'market'),
+    < positionedPanel.findIndex((row) => row.id === 'workbuddy-ai'),
   positionedPanel.map((row) => row.id).join(','));
+check('the panel keeps category order across categories', (() => {
+  const config2 = mergeConfig(CONFIG, { position: { pet: 1 } });
+  const order = panelGroups(positionedPanel, config2, t).map((g) => g.category);
+  const declared = config2.grouping.order;
+  return order.every((cat, index) => index === 0 || declared.indexOf(order[index - 1]) <= declared.indexOf(cat));
+})(), positionedPanel.map((row) => row.id).join(','));
 
 console.log('\n5) treat a plugin entry as shipped');
 const promoting = mergeConfig(CONFIG, { official: ['workbuddy-ai'] });
@@ -353,6 +360,48 @@ check('storage failures never throw', (() => {
     setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } } };
   return readPanelPosition(broken) === null && writePanelPosition(broken, { left: 1, top: 1 }) === false
     && clearPanelPosition(broken) === false;
+})());
+
+console.log('\n7c) drag to reorder');
+check('reorder moves an item forward',
+  reorderIds(['a', 'b', 'c', 'd'], 'd', 0).join(',') === 'd,a,b,c',
+  reorderIds(['a', 'b', 'c', 'd'], 'd', 0).join(','));
+check('reorder moves an item backward',
+  reorderIds(['a', 'b', 'c', 'd'], 'a', 3).join(',') === 'b,c,d,a',
+  reorderIds(['a', 'b', 'c', 'd'], 'a', 3).join(','));
+check('reorder clamps an out-of-range index',
+  reorderIds(['a', 'b'], 'a', 99).join(',') === 'b,a');
+check('reorder ignores an unknown id', reorderIds(['a'], 'zz', 0).join(',') === 'a');
+check('positions map follows the new order',
+  JSON.stringify(positionsForOrder(['c', 'a', 'b'])) === JSON.stringify({ c: 1, a: 2, b: 3 }));
+check('drop index counts card centres above the pointer',
+  dropIndexAt([100, 200, 300], 50) === 0
+  && dropIndexAt([100, 200, 300], 150) === 1
+  && dropIndexAt([100, 200, 300], 250) === 2
+  && dropIndexAt([100, 200, 300], 350) === 3);
+
+const dragView = { localStorage: memoryStorage() };
+check('a reorder persists explicit positions',
+  writePositionOverride(dragView, positionsForOrder(['c', 'a'])) === true
+  && readOverride(dragView).position.c === 1 && readOverride(dragView).position.a === 2);
+check('a second reorder merges instead of replacing',
+  writePositionOverride(dragView, { b: 3 }) === true
+  && readOverride(dragView).position.a === 2 && readOverride(dragView).position.b === 3);
+check('other override keys survive a reorder', (() => {
+  dragView.localStorage.setItem('dsh-plugin-organizer:config', JSON.stringify({ rename: { pet: '萌宠' } }));
+  writePositionOverride(dragView, { pet: 1 });
+  const stored = readOverride(dragView);
+  return stored.rename.pet === '萌宠' && stored.position.pet === 1;
+})());
+check('the persisted order drives the viewer config', (() => {
+  const scope = { localStorage: memoryStorage() };
+  writePositionOverride(scope, { 'dsh-usage': 1 });
+  const merged = readConfig(scope);
+  return merged.position['dsh-usage'] === 1;
+})());
+check('a reorder survives a corrupt override', (() => {
+  const scope = { localStorage: memoryStorage({ 'dsh-plugin-organizer:config': 'not json' }) };
+  return writePositionOverride(scope, { pet: 2 }) === true && readOverride(scope).position.pet === 2;
 })());
 
 console.log('\n8) config CLI (scripts/nav.mjs)');
@@ -549,9 +598,14 @@ const dragged = tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true
 check('the dialog is centred until it is moved', dragged.props.style === undefined);
 const head = tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
   .filter((n) => n.tag === 'header')[0];
-check('the header is the drag handle',
-  typeof head.props.onPointerDown === 'function' && typeof head.props.onPointerMove === 'function'
-  && typeof head.props.onPointerUp === 'function');
+check('the header advertises itself as the native drag handle',
+  head.props['data-drag-handle'] === 'true', JSON.stringify(head.props.className));
+check('cards carry their drag identity',
+  tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
+    .filter((n) => n.tag === 'article')
+    .every((n) => n.props['data-card'] === 'true' && typeof n.props['data-id'] === 'string'
+      && typeof n.props['data-category'] === 'string'),
+  'card attributes missing');
 check('a recenter action exists',
   tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
     .filter((n) => n.tag === 'button').some((n) => n.props.title === '复位位置'));

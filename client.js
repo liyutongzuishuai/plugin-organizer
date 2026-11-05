@@ -156,6 +156,68 @@ window.__ModuleLoader__.load({
       return typeof value === 'number' && isFinite(value) ? value : undefined;
     }
 
+    /** Move one id inside an ordered list, clamping the target index. */
+    function reorderIds(ids, id, targetIndex) {
+      const from = ids.indexOf(id);
+      if (from === -1) return ids.slice();
+      const next = ids.slice();
+      next.splice(from, 1);
+      const clamped = Math.max(0, Math.min(Math.round(targetIndex), next.length));
+      next.splice(clamped, 0, id);
+      return next;
+    }
+
+    /** Explicit positions (1-based) for an ordered id list. */
+    function positionsForOrder(ids) {
+      const out = {};
+      for (let i = 0; i < ids.length; i += 1) out[ids[i]] = i + 1;
+      return out;
+    }
+
+    /**
+     * Which gap a pointer is over, given each card's vertical centre.
+     * @param centres - card centre Y values, top to bottom.
+     * @param clientY - pointer Y.
+     * @returns insertion index in [0, centres.length].
+     */
+    function dropIndexAt(centres, clientY) {
+      let index = 0;
+      for (let i = 0; i < centres.length; i += 1) {
+        if (clientY > centres[i]) index = i + 1;
+      }
+      return index;
+    }
+
+    /** Read the stored override object, tolerating a malformed value. */
+    function readOverride(view) {
+      try {
+        const scope = view === undefined ? globalThis : view;
+        const storage = scope === null || scope === undefined ? undefined : scope.localStorage;
+        const raw = storage === undefined ? null : storage.getItem(STORAGE_KEY);
+        if (typeof raw !== 'string' || raw.length === 0) return {};
+        const parsed = JSON.parse(raw);
+        return parsed !== null && typeof parsed === 'object' ? parsed : {};
+      } catch (error) {
+        return {};
+      }
+    }
+
+    /** Merge position overrides into the stored override and persist them. */
+    function writePositionOverride(view, positions) {
+      try {
+        const scope = view === undefined ? globalThis : view;
+        const storage = scope === null || scope === undefined ? undefined : scope.localStorage;
+        if (storage === undefined) return false;
+        const current = readOverride(scope);
+        const merged = Object.assign({}, current.position, positions);
+        const next = Object.assign({}, current, { position: merged });
+        storage.setItem(STORAGE_KEY, JSON.stringify(next));
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
     /** Keep a dragged panel on screen, with an 8px breathing edge. */
     function clampPanelPosition(position, size, viewport) {
       const edge = 8;
@@ -468,8 +530,11 @@ window.__ModuleLoader__.load({
     function panelRows(entries, config) {
       const plan = planNav(entries, config);
       const rows = [];
-      for (let i = 0; i < plan.rows.length; i += 1) {
-        const row = plan.rows[i];
+      // Follow the visual sequence, not the DOM order the shell renders: the
+      // panel must show the order the user arranged, including explicit
+      // positions set by dragging.
+      for (let i = 0; i < plan.sequence.length; i += 1) {
+        const row = plan.sequence[i];
         if (!row.thirdParty && !row.promoted) continue;
         const renamed = typeof row.rename === 'string' && row.rename.length > 0;
         const id = row.id === undefined || row.id === null ? '' : String(row.id);
@@ -575,6 +640,9 @@ window.__ModuleLoader__.load({
       const setDragging = draggingState[1];
       const dragRef = React.useRef(null);
       const positionRef = React.useRef(position);
+      const revisionState = React.useState(0);
+      const revision = revisionState[0];
+      const setRevision = revisionState[1];
       // Keep the panel mounted briefly after close so it can animate out.
       const visibleState = React.useState(open);
       const visible = visibleState[0];
@@ -582,42 +650,11 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => { positionRef.current = position; }, [position]);
 
-      const onDragStart = (event) => {
-        const node = panelRef.current;
-        if (node === null || node === undefined) return;
-        if (event.pointerType === 'mouse' && event.button !== 0) return;
-        const rect = node.getBoundingClientRect();
-        dragRef.current = {
-          dx: event.clientX - rect.left,
-          dy: event.clientY - rect.top,
-          width: rect.width,
-          height: rect.height
-        };
-        setDragging(true);
-        if (typeof event.currentTarget.setPointerCapture === 'function') {
-          try { event.currentTarget.setPointerCapture(event.pointerId); } catch (error) { /* pointer capture is best effort */ }
-        }
-      };
-      const onDragMove = (event) => {
-        const drag = dragRef.current;
-        if (drag === null || drag === undefined) return;
-        setPosition(clampPanelPosition(
-          { left: event.clientX - drag.dx, top: event.clientY - drag.dy },
-          { width: drag.width, height: drag.height },
-          { width: globalThis.innerWidth, height: globalThis.innerHeight }
-        ));
-      };
-      const onDragEnd = () => {
-        if (dragRef.current === null || dragRef.current === undefined) return;
-        dragRef.current = null;
-        setDragging(false);
-        const settled = positionRef.current;
-        if (settled !== null && settled !== undefined) writePanelPosition(globalThis, settled);
-      };
       const recenter = () => {
         clearPanelPosition(globalThis);
         setPosition(null);
       };
+
 
       React.useEffect(() => {
         if (open) {
@@ -645,9 +682,122 @@ window.__ModuleLoader__.load({
         };
       }, [open, props.store]);
 
+      // Window drag with native listeners: pointer capture through React's
+      // synthetic layer is easy to lose, so the handle and the move/up
+      // listeners are attached directly to the nodes.
+      React.useEffect(() => {
+        if (!open) return undefined;
+        const panel = panelRef.current;
+        if (panel === null || panel === undefined) return undefined;
+        const handle = panel.querySelector('[data-drag-handle="true"]');
+        if (handle === null || handle === undefined) return undefined;
+        let start = null;
+        const onDown = (event) => {
+          if (event.pointerType === 'mouse' && event.button !== 0) return;
+          if (event.target instanceof Element
+            && event.target.closest('button, input, [data-card="true"]') !== null) return;
+          const rect = panel.getBoundingClientRect();
+          start = { dx: event.clientX - rect.left, dy: event.clientY - rect.top, width: rect.width, height: rect.height };
+          setDragging(true);
+          if (typeof handle.setPointerCapture === 'function') {
+            try { handle.setPointerCapture(event.pointerId); } catch (error) { /* best effort */ }
+          }
+          event.preventDefault();
+        };
+        const onMove = (event) => {
+          if (start === null) return;
+          setPosition(clampPanelPosition(
+            { left: event.clientX - start.dx, top: event.clientY - start.dy },
+            { width: start.width, height: start.height },
+            { width: globalThis.innerWidth, height: globalThis.innerHeight }
+          ));
+        };
+        const onUp = () => {
+          if (start === null) return;
+          start = null;
+          setDragging(false);
+          setTimeout(() => {
+            const settled = positionRef.current;
+            if (settled !== null && settled !== undefined) writePanelPosition(globalThis, settled);
+          }, 0);
+        };
+        handle.addEventListener('pointerdown', onDown);
+        globalThis.addEventListener('pointermove', onMove);
+        globalThis.addEventListener('pointerup', onUp);
+        globalThis.addEventListener('pointercancel', onUp);
+        return () => {
+          handle.removeEventListener('pointerdown', onDown);
+          globalThis.removeEventListener('pointermove', onMove);
+          globalThis.removeEventListener('pointerup', onUp);
+          globalThis.removeEventListener('pointercancel', onUp);
+        };
+      }, [open, setPosition, setDragging]);
+
+      // Card drag: reorder inside one category, then persist the new order as
+      // explicit positions. Works with the same native listener model.
+      React.useEffect(() => {
+        if (!open) return undefined;
+        const panel = panelRef.current;
+        if (panel === null || panel === undefined) return undefined;
+        let drag = null;
+        const cardsIn = (category) => Array.from(panel.querySelectorAll('[data-card="true"][data-category="' + category + '"]'));
+        const clearMarks = () => {
+          const marked = panel.querySelectorAll('[data-drop="true"]');
+          for (let i = 0; i < marked.length; i += 1) marked[i].setAttribute('data-drop', 'false');
+        };
+        const onDown = (event) => {
+          if (event.pointerType === 'mouse' && event.button !== 0) return;
+          const card = event.target instanceof Element ? event.target.closest('[data-card="true"]') : null;
+          if (card === null || card === undefined) return;
+          if (event.target.closest('button') !== null) return;
+          drag = { id: card.getAttribute('data-id'), category: card.getAttribute('data-category') };
+          card.setAttribute('data-dragging', 'true');
+          event.preventDefault();
+        };
+        const onMove = (event) => {
+          if (drag === null) return;
+          const cards = cardsIn(drag.category).filter((node) => node.getAttribute('data-id') !== drag.id);
+          const centres = cards.map((node) => {
+            const rect = node.getBoundingClientRect();
+            return rect.top + rect.height / 2;
+          });
+          const index = dropIndexAt(centres, event.clientY);
+          clearMarks();
+          if (cards.length === 0) return;
+          const target = cards[Math.min(index, cards.length - 1)];
+          target.setAttribute('data-drop', 'true');
+          drag.index = index;
+        };
+        const onUp = () => {
+          if (drag === null) return;
+          const finished = drag;
+          drag = null;
+          clearMarks();
+          const dragged = panel.querySelector('[data-card="true"][data-id="' + finished.id + '"]');
+          if (dragged !== null && dragged !== undefined) dragged.setAttribute('data-dragging', 'false');
+          if (typeof finished.index !== 'number') return;
+          const ids = cardsIn(finished.category).map((node) => node.getAttribute('data-id'));
+          const next = reorderIds(ids, finished.id, finished.index);
+          if (next.join(',') === ids.join(',')) return;
+          writePositionOverride(globalThis, positionsForOrder(next));
+          setRevision((value) => value + 1);
+          if (typeof props.refreshNav === 'function') props.refreshNav();
+        };
+        panel.addEventListener('pointerdown', onDown);
+        globalThis.addEventListener('pointermove', onMove);
+        globalThis.addEventListener('pointerup', onUp);
+        globalThis.addEventListener('pointercancel', onUp);
+        return () => {
+          panel.removeEventListener('pointerdown', onDown);
+          globalThis.removeEventListener('pointermove', onMove);
+          globalThis.removeEventListener('pointerup', onUp);
+          globalThis.removeEventListener('pointercancel', onUp);
+        };
+      }, [open, props]);
+
       if (!open && !visible) return null;
 
-      const config = props.config();
+      const config = props.config(revision);
       const all = panelRows(props.read(), config);
       const rows = filterPanelRows(all, query);
       const groups = panelGroups(rows, config, t);
@@ -678,13 +828,7 @@ window.__ModuleLoader__.load({
             ? undefined
             : { position: 'absolute', left: String(position.left) + 'px', top: String(position.top) + 'px' }
         },
-          h('header', {
-            className: 'po-head',
-            onPointerDown: onDragStart,
-            onPointerMove: onDragMove,
-            onPointerUp: onDragEnd,
-            onPointerCancel: onDragEnd
-          },
+          h('header', { className: 'po-head', 'data-drag-handle': 'true' },
             h('div', { className: 'po-head-text' },
               h('h2', { className: 'po-title', id: titleId }, t('panelTitle')),
               h('p', { className: 'po-subtitle' }, t('panelSubtitle'))),
@@ -744,6 +888,11 @@ window.__ModuleLoader__.load({
                         return h('article', {
                           key: group.category + ':' + row.id,
                           className: 'po-card',
+                          'data-card': 'true',
+                          'data-id': row.id,
+                          'data-category': group.category,
+                          'data-dragging': 'false',
+                          'data-drop': 'false',
                           'data-promoted': row.promoted ? 'true' : 'false',
                           style: { '--po-i': String(index) }
                         },
@@ -787,8 +936,11 @@ window.__ModuleLoader__.load({
       '.po-group-body[data-open="false"]{grid-template-rows:0fr}',
       '.po-group-inner{display:flex;flex-direction:column;gap:8px;overflow:hidden;padding-bottom:6px;transition:padding-bottom 220ms var(--po-ease)}',
       '.po-group-body[data-open="false"] .po-group-inner{padding-bottom:0}',
-      '.po-card{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:10px 12px;border:0.5px solid var(--dsw-alias-settings-card-stroke,var(--dsw-alias-border-l2,rgba(255,255,255,.12)));border-radius:12px;background:var(--dsw-alias-settings-card-fill,var(--dsw-alias-bg-layer-1,#232326));animation:po-card 320ms var(--po-ease) both;animation-delay:calc(var(--po-i,0) * 26ms);transition:transform 170ms var(--po-ease),border-color 170ms var(--po-ease),box-shadow 170ms var(--po-ease)}',
+      '.po-card{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:10px 12px;border:0.5px solid var(--dsw-alias-settings-card-stroke,var(--dsw-alias-border-l2,rgba(255,255,255,.12)));border-radius:12px;background:var(--dsw-alias-settings-card-fill,var(--dsw-alias-bg-layer-1,#232326));animation:po-card 320ms var(--po-ease) backwards;animation-delay:calc(var(--po-i,0) * 26ms);transition:transform 170ms var(--po-ease),border-color 170ms var(--po-ease),box-shadow 170ms var(--po-ease)}',
+      '.po-card{cursor:grab;position:relative}',
       '.po-card:hover{transform:translateY(-1px);border-color:var(--dsw-alias-border-l3,rgba(255,255,255,.2));box-shadow:0 8px 22px rgba(0,0,0,.22)}',
+      '.po-card[data-dragging="true"]{cursor:grabbing;z-index:1;opacity:.9;transform:translateY(-1px) scale(.995);box-shadow:0 14px 30px rgba(0,0,0,.32)}',
+      '.po-card[data-drop="true"]{box-shadow:inset 0 2px 0 var(--dsw-alias-state-business-primary,#4c8dff)}',
       '.po-card[data-promoted="true"]{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary,#4c8dff) 40%,transparent)}',
       '.po-card-name{flex:1 1 auto;min-width:0;font-size:13px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.po-card-pkg{flex:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8b8b90)}',
@@ -821,6 +973,8 @@ window.__ModuleLoader__.load({
 
     /** Keep the settings navigation banded, grouped, and renamed as configured. */
     function apply(ctx) {
+      // Set by the navigation effect below; the panel calls it after a reorder.
+      const navRefresh = { current: () => {} };
       ctx.effect(() => ctx.locale.register(NS, { zh: zh, en: en }),
         'plugin-organizer: dictionaries');
       const t = ctx.locale.bind(NS);
@@ -859,6 +1013,7 @@ window.__ModuleLoader__.load({
         document.head.appendChild(style);
         styles.push(style);
         const rebuild = () => { render(style); };
+        navRefresh.current = rebuild;
         rebuild();
         const offSlot = typeof ctx.slots.subscribe === 'function'
           ? ctx.slots.subscribe('settings.section', rebuild)
@@ -905,7 +1060,8 @@ window.__ModuleLoader__.load({
         inject: () => ({
           store: store,
           read: readSections,
-          config: () => readConfig(globalThis)
+          config: () => readConfig(globalThis),
+          refreshNav: () => navRefresh.current()
         })
       }, OrganizerPanel));
 
@@ -927,6 +1083,11 @@ window.__ModuleLoader__.load({
         planNav: planNav,
         buildCss: buildCss,
         createOpenStore: createOpenStore,
+        reorderIds: reorderIds,
+        positionsForOrder: positionsForOrder,
+        dropIndexAt: dropIndexAt,
+        readOverride: readOverride,
+        writePositionOverride: writePositionOverride,
         PANEL_POSITION_KEY: PANEL_POSITION_KEY,
         clampPanelPosition: clampPanelPosition,
         readPanelPosition: readPanelPosition,

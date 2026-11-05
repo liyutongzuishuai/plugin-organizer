@@ -76,8 +76,11 @@ https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/market/
   170ms 淡出后卸载（期间不再接收点击）；分组折叠用 `grid-template-rows` 过渡 220ms；
   `prefers-reduced-motion: reduce` 时全部关闭
 - 键盘：`Esc` 关闭、打开时焦点进入面板；`role="dialog"` + `aria-modal` + 标题关联
-- **可拖动**：拖标题移动面板，松手后位置存进 `localStorage`（键 `dsh-plugin-organizer:panel-position`），
-  重开仍在原处；位置会被钳制在视口内（四周留 8px）；标题右侧「复位位置」按钮清除记忆回到居中
+- **可拖动（窗口）**：拖标题移动面板，松手后位置存进 `localStorage`（键 `dsh-plugin-organizer:panel-position`），
+  重开仍在原处；位置被钳制在视口内（四周留 8px）；标题右侧「复位位置」按钮清除记忆回到居中
+- **可拖动（卡片）**：直接拖面板里的卡片就能改同一分组内的先后顺序；拖动时被拖卡片抬升、目标位置出现强调线，
+  松手后顺序写进 `localStorage` 的 `position` 覆盖并立即重写导航样式，设置里的顺序同步变化。
+  跨分组移动请用 `assign`（拖动只在同一分组内重排）
 - 面板内改名与分组复用 `nav-config.json` 的 `rename` / `grouping`，被提升的入口显示「已归入官方」标记
 
 面板是总览：点卡片不会跳转（宿主没有暴露切换设置页的服务），底部提示告诉你在左侧设置里点同名条目。
