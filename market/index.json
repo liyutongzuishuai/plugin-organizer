@@ -28,8 +28,8 @@
         "zh": "插件设置收纳"
       },
       "description": {
-        "en": "Files plugin-added settings entries into two bands, groups them by category, renames them, promotes them into the shipped band, and lets you position any entry individually — plus a draggable, animated overview panel.",
-        "zh": "把插件添加的设置入口分成官方/插件两段，按类别分组、可改名、可提升为官方、可逐项指定先后；另有一个可拖动、带动效的分组总览面板。"
+        "en": "Files plugin-added settings entries into two bands, groups them by category, renames them, promotes them into the shipped band, and lets you drag cards to reorder — the navigation follows. Includes a draggable, animated overview panel.",
+        "zh": "把插件添加的设置入口分成官方/插件两段，按类别分组、可改名、可提升为官方、可拖动卡片排序（设置导航同步变化）；另有一个可拖动、带动效的分组总览面板。"
       },
       "icon": "https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/icon.svg",
       "author": "liyutongzuishuai",
@@ -51,12 +51,12 @@
       },
       "versions": [
         {
-          "version": "1.5.0",
-          "publishTimestamp": 1793887743,
+          "version": "1.6.0",
+          "publishTimestamp": 1793888495,
           "source": {
             "type": "git",
             "url": "https://github.com/liyutongzuishuai/plugin-organizer",
-            "commit": "97155aedd03dc92d1ced9692132d084100b42fc9"
+            "commit": "b320a8fedbc51641975a9c61d5e78f9191433853"
           },
           "engines": {
             "dsh": "^0.2.0-0"
