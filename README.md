@@ -65,6 +65,21 @@ https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/market/
 
 同一插件也已提交到社区精选列表 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)（条目文件 `data/plugins/liyutongzuishuai__plugin-organizer.yml`）。
 
+## 分组面板（独立界面）
+
+侧栏底部「设置」旁多了一个九宫格按钮，点开是插件自带的分组面板——**不依赖宿主的类名与 DOM**，
+自带弹层、搜索、分组折叠与入场动效：
+
+- 只读 `settings.section` 账本 + 主题令牌（每个令牌都带兜底色值，缺令牌也能看）
+- 不读取、不修改宿主编译后的样式类名；宿主改版最坏是配色不跟随，不会白屏或错位
+- 动效：遮罩淡入 180ms、面板上浮 240ms、卡片按 26ms 递增错峰入场；分组折叠用
+  `grid-template-rows` 过渡 220ms；`prefers-reduced-motion: reduce` 时全部关闭
+- 键盘：`Esc` 关闭、打开时焦点进入面板；`role="dialog"` + `aria-modal` + 标题关联
+- 面板内改名与分组复用 `nav-config.json` 的 `rename` / `grouping`，被提升的入口显示「已归入官方」标记
+
+面板是总览：点卡片不会跳转（宿主没有暴露切换设置页的服务），底部提示告诉你在左侧设置里点同名条目。
+需要直接改导航顺序时，仍由下面的 CSS 分区负责；两者可以同时启用。
+
 ## 配置：分组 / 重命名 / 当成官方
 
 用命令行改，一条命令同时写入配置并烘焙进客户端，**刷新页面即生效**：

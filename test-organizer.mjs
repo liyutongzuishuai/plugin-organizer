@@ -31,13 +31,33 @@ const documentShim = {
   }
 };
 globalThis.document = documentShim;
+
+/* Minimal React shim: enough for structural assertions on the panel tree. */
+const HOOK_CALLS = { effect: 0 };
+const reactShim = {
+  createElement(type, props, ...children) {
+    const flat = [];
+    for (const child of children) {
+      if (Array.isArray(child)) flat.push(...child);
+      else if (child !== null && child !== undefined && child !== false) flat.push(child);
+    }
+    return { type, props: props === null || props === undefined ? { children: flat } : { ...props, children: flat } };
+  },
+  useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+  useEffect: () => { HOOK_CALLS.effect += 1; },
+  useRef: () => ({ current: null }),
+  useId: () => 'po-panel-title'
+};
 globalThis.window = {
   __ModuleLoader__: {
     load(spec) {
       if (spec.id !== packageName) {
         throw new Error('browser module id must equal package.json name: ' + spec.id + ' != ' + packageName);
       }
-      registered = spec.factory();
+      registered = spec.factory((name) => {
+        if (name === 'react') return reactShim;
+        throw new Error('unexpected require: ' + name);
+      });
     }
   }
 };
@@ -46,7 +66,8 @@ new Function('window', 'document', source)(globalThis.window, documentShim);
 if (registered === null) throw new Error('bundle registered nothing');
 const {
   CONFIG, mergeConfig, readConfig, planNav, buildCss, categoryOf,
-  categoryLabel, dictionaries
+  categoryLabel, dictionaries, createOpenStore, panelRows, panelGroups,
+  filterPanelRows, PanelTrigger, OrganizerPanel, PANEL_CSS
 } = registered.__internals;
 
 let failures = 0;
@@ -192,6 +213,9 @@ console.log('\n7) live wiring');
 const effects = [];
 const slotSubs = [];
 const localeSubs = [];
+const injectedSlots = [];
+const registrations = [];
+let currentSlot = null;
 const ctx = {
   effect(fn, label) { effects.push(label); return fn(); },
   locale: {
@@ -201,15 +225,32 @@ const ctx = {
   },
   slots: {
     entries: (key) => (key === 'settings.section' ? FIXTURE : []),
-    subscribe: (key, fn) => { slotSubs.push({ key, fn }); return () => {}; }
+    subscribe: (key, fn) => { slotSubs.push({ key, fn }); return () => {}; },
+    register(options, component) {
+      registrations.push({ slot: currentSlot, options, component });
+      return () => {};
+    },
+    inject(slot, factory) {
+      injectedSlots.push(slot);
+      currentSlot = slot;
+      try { return factory(); } finally { currentSlot = null; }
+    }
   }
 };
 const api = registered.apply(ctx);
 check('registers dictionaries', ctx.locale.registered.dicts.zh.navGroup === '插件提供');
-check('style element appended once', appends.length === 1, String(appends.length));
-check('stylesheet written on mount', appends[0].textContent.includes('插件提供 · 10'));
+check('two style elements (nav rules + panel css)', appends.length === 2, String(appends.length));
+check('nav stylesheet written on mount', appends[0].textContent.includes('插件提供 · 10'));
+check('panel css injected', appends[1].textContent.includes('@keyframes po-rise'));
 check('subscribes to the ledger', slotSubs.length === 1 && slotSubs[0].key === 'settings.section');
-check('two effects installed', effects.length === 2, String(effects.length));
+check('three effects installed', effects.length === 3, String(effects.length));
+check('registers a trigger and an overlay',
+  registrations.map((r) => r.slot).join(',') === 'sidebar.footer.action,shell.overlay',
+  registrations.map((r) => r.slot).join(','));
+check('trigger registration carries a locale label',
+  registrations[0].options.label() === '插件设置总览', registrations[0].options.label());
+check('overlay registration supplies its deps',
+  typeof registrations[1].options.inject === 'function');
 check('reload() rewrites the sheet', typeof api.reload === 'function'
   && api.reload() !== undefined
   && appends[0].textContent.includes('插件提供 · 10'));
@@ -269,6 +310,120 @@ try {
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
 }
+
+console.log('\n9) standalone panel');
+
+/* Render a component tree to plain text markers for structural assertions. */
+function tags(node, out = []) {
+  if (node === null || node === undefined) return out;
+  if (Array.isArray(node)) { node.forEach((child) => tags(child, out)); return; }
+  if (typeof node !== 'object') return out;
+  if (typeof node.type === 'function') { tags(node.type(node.props), out); return; }
+  if (typeof node.type === 'string') out.push({ tag: node.type, props: node.props });
+  const children = node.props && node.props.children;
+  if (Array.isArray(children)) children.forEach((child) => tags(child, out));
+  return out;
+}
+const textOf = (node) => {
+  let text = '';
+  const visit = (value) => {
+    if (value === null || value === undefined) return;
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    if (typeof value === 'string' || typeof value === 'number') { text += String(value); return; }
+    if (typeof value !== 'object') return;
+    if (typeof value.type === 'function') { visit(value.type(value.props)); return; }
+    visit(value.props && value.props.children);
+  };
+  visit(node);
+  return text;
+};
+
+const expectedPanelCount = planNav(FIXTURE, CONFIG).thirdPartyCount + planNav(FIXTURE, CONFIG).promotedCount;
+const rows = panelRows(FIXTURE, CONFIG);
+check('panel lists only plugin-provided entries', rows.length === expectedPanelCount, String(rows.length));
+check('panel rows carry the package name', rows.every((row) => typeof row.package === 'string'));
+check('shipped entries are excluded', rows.every((row) => row.id !== 'general' && row.id !== 'agent-presets'));
+check('rename reaches the panel', panelRows(FIXTURE, mergeConfig(CONFIG, { rename: { pet: '萌宠' } }))
+  .find((row) => row.id === 'pet').name === '萌宠');
+check('promoted entries stay listed', panelRows(FIXTURE, mergeConfig(CONFIG, { official: ['pet'] }))
+  .find((row) => row.id === 'pet').promoted === true);
+
+const groups = panelGroups(rows, CONFIG, t);
+check('panel groups follow the configured order', (() => {
+  const declared = CONFIG.grouping.order;
+  const ranks = groups.map((g) => declared.indexOf(g.category));
+  return ranks.every((value, index) => index === 0 || ranks[index - 1] <= value);
+})(), groups.map((g) => g.category).join(','));
+check('panel group counts add up',
+  groups.reduce((sum, g) => sum + g.rows.length, 0) === rows.length);
+check('panel group labels are localized',
+  groups.every((g) => typeof g.label === 'string' && g.label.length > 0));
+check('empty categories are omitted', groups.every((g) => g.rows.length > 0));
+
+check('filter matches the display name', filterPanelRows(rows, '萌宠').length === 0
+  && filterPanelRows(panelRows(FIXTURE, mergeConfig(CONFIG, { rename: { pet: '萌宠' } })), '萌宠').length === 1);
+check('filter matches the package', filterPanelRows(rows, 'linxin666').length > 0);
+check('filter matches the section id', filterPanelRows(rows, 'plugin-settings').length === 1);
+check('empty query keeps every row', filterPanelRows(rows, '   ').length === rows.length);
+check('no match returns nothing', filterPanelRows(rows, 'zzz-nothing').length === 0);
+
+check('panel css has enter animations',
+  PANEL_CSS.includes('@keyframes po-rise') && PANEL_CSS.includes('@keyframes po-fade')
+  && PANEL_CSS.includes('@keyframes po-card'));
+check('panel css staggers cards', PANEL_CSS.includes('animation-delay:calc(var(--po-i,0) * 26ms)'));
+check('panel css animates disclosure', PANEL_CSS.includes('grid-template-rows 220ms'));
+check('panel css honours prefers-reduced-motion', PANEL_CSS.includes('@media (prefers-reduced-motion: reduce)'));
+check('panel css falls back when a token is missing',
+  PANEL_CSS.includes('var(--dsw-alias-bg-layer-2,#1b1b1e)')
+  && PANEL_CSS.includes('var(--dsw-alias-label-primary,#f2f2f3)'));
+check('panel css never targets a host class name',
+  !/navCell|navList|VOzbGW|data-shortcut-modal/.test(PANEL_CSS),
+  (PANEL_CSS.match(/navCell|navList|VOzbGW|data-shortcut-modal/) || [''])[0]);
+
+const closed = createOpenStore(false);
+check('store starts closed and reports changes', (() => {
+  let calls = 0;
+  const off = closed.subscribe(() => { calls += 1; });
+  closed.set(true);
+  closed.set(true);
+  off();
+  closed.set(false);
+  return calls === 1 && closed.get() === false;
+})(), 'store emitted an unexpected number of times');
+
+const panelProps = {
+  t,
+  store: createOpenStore(true),
+  read: () => FIXTURE,
+  config: () => CONFIG
+};
+check('panel renders nothing while closed', OrganizerPanel({ ...panelProps, store: createOpenStore(false) }) === null);
+const tree = OrganizerPanel(panelProps);
+const nodes = tags(tree);
+check('panel renders a modal dialog',
+  nodes.some((n) => n.tag === 'div' && n.props.role === 'dialog' && n.props['aria-modal'] === 'true'));
+check('panel is labelled by its title',
+  nodes.some((n) => n.tag === 'h2' && n.props.id === 'po-panel-title'));
+check('panel renders a search box',
+  nodes.some((n) => n.tag === 'input' && n.props.type === 'search'));
+check('panel renders one head per group',
+  nodes.filter((n) => n.tag === 'section').length === groups.length);
+check('panel renders one card per entry',
+  nodes.filter((n) => n.tag === 'article').length === rows.length,
+  String(nodes.filter((n) => n.tag === 'article').length));
+check('cards receive their stagger index',
+  nodes.filter((n) => n.tag === 'article').every((n) => typeof n.props.style['--po-i'] === 'string'));
+check('panel shows the entry count', textOf(tree).includes(String(rows.length) + ' 项'));
+check('panel hint tells where to click', textOf(tree).includes('设置'));
+
+const triggerNodes = tags(PanelTrigger({ t, store: createOpenStore(false) }));
+const triggerButtons = triggerNodes.filter((n) => n.tag === 'button');
+check('trigger is a labelled button',
+  triggerButtons.length === 1
+  && triggerButtons[0].props['aria-label'] === '插件设置总览'
+  && typeof triggerButtons[0].props.onClick === 'function',
+  JSON.stringify(triggerNodes.map((n) => n.tag)));
+check('trigger paints its own icon', triggerNodes.some((n) => n.tag === 'svg'));
 
 console.log('');
 if (failures > 0) {

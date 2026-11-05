@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-organizer",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -30,7 +30,7 @@
       "inject": []
     }
   },
-  "description": "Files plugin-added settings entries below the shipped ones behind a divider in the dsh Web settings navigation.",
+  "description": "Groups plugin-added settings entries: a standalone animated panel plus an in-navigation band split, driven by nav-config.json.",
   "license": "MIT",
   "author": "liyutongzuishuai",
   "homepage": "https://github.com/liyutongzuishuai/plugin-organizer#readme",
