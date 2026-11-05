@@ -28,8 +28,8 @@
         "zh": "插件设置收纳"
       },
       "description": {
-        "en": "Groups the settings navigation into two bands: entries shipped with dsh stay on top, entries registered by installed plugins move below them behind a divider with a live count. Re-plans automatically as plugins come and go.",
-        "zh": "把设置导航分成两组：dsh 自带的入口在上，已安装插件注册的入口在下，中间用带实时计数的分割线分开；插件增减时自动重排。"
+        "en": "Groups the settings navigation into two bands: entries shipped with dsh stay on top, entries registered by installed plugins move below them behind a divider with a live count. Inside the plugin band, entries are grouped by category, can be renamed, and can be promoted into the top band — all driven by nav-config.json.",
+        "zh": "把设置导航分成两组：dsh 自带的入口在上，已安装插件注册的入口在下，中间用带实时计数的分割线分开。插件区内还可按类别分组、给入口改名、把某些第三方入口提升到官方区——全部由 nav-config.json 驱动。"
       },
       "icon": "https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/icon.svg",
       "author": "liyutongzuishuai",
@@ -51,12 +51,12 @@
       },
       "versions": [
         {
-          "version": "1.1.0",
-          "publishTimestamp": 1793884902,
+          "version": "1.2.0",
+          "publishTimestamp": 1793886003,
           "source": {
             "type": "git",
             "url": "https://github.com/liyutongzuishuai/plugin-organizer",
-            "commit": "5efbaa8427817198249a0494d59160885e8134cf"
+            "commit": "184f3ec766aebd3c6641f2e1aae62018c5534c7d"
           },
           "engines": {
             "dsh": "^0.2.0-0"
