@@ -28,8 +28,8 @@
         "zh": "插件设置收纳"
       },
       "description": {
-        "en": "Groups plugin-added settings entries: a standalone animated panel (own markup, theme-token only, staggered entrance, live search) plus an in-navigation band split, both driven by nav-config.json.",
-        "zh": "把插件添加的设置入口整理成组：独立的分组面板（自带弹层、错峰入场动效、实时搜索）+ 设置导航内的官方/插件分区，都由 nav-config.json 驱动。"
+        "en": "Files plugin-added settings entries into two bands, groups them by category, renames them, promotes them into the shipped band, and lets you position any entry individually — plus a draggable, animated overview panel.",
+        "zh": "把插件添加的设置入口分成官方/插件两段，按类别分组、可改名、可提升为官方、可逐项指定先后；另有一个可拖动、带动效的分组总览面板。"
       },
       "icon": "https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/icon.svg",
       "author": "liyutongzuishuai",
@@ -51,12 +51,12 @@
       },
       "versions": [
         {
-          "version": "1.4.0",
-          "publishTimestamp": 1793886846,
+          "version": "1.5.0",
+          "publishTimestamp": 1793887743,
           "source": {
             "type": "git",
             "url": "https://github.com/liyutongzuishuai/plugin-organizer",
-            "commit": "776377764ad021d7aab119e01492afc7b13cef8e"
+            "commit": "97155aedd03dc92d1ced9692132d084100b42fc9"
           },
           "engines": {
             "dsh": "^0.2.0-0"
