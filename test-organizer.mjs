@@ -67,7 +67,9 @@ if (registered === null) throw new Error('bundle registered nothing');
 const {
   CONFIG, mergeConfig, readConfig, planNav, buildCss, categoryOf,
   categoryLabel, dictionaries, createOpenStore, panelRows, panelGroups,
-  filterPanelRows, PanelTrigger, OrganizerPanel, PANEL_CSS
+  filterPanelRows, PanelTrigger, OrganizerPanel, PANEL_CSS,
+  clampPanelPosition, readPanelPosition, writePanelPosition, clearPanelPosition,
+  PANEL_POSITION_KEY
 } = registered.__internals;
 
 let failures = 0;
@@ -119,7 +121,11 @@ check('10 plugin rows', plan.thirdPartyCount === 10, String(plan.thirdPartyCount
 check('shipped rows keep registration order',
   plan.rows.filter((r) => !r.thirdParty).map((r) => r.id).join(',')
     === 'account,general,models,plugins,agent-presets');
-check('first plugin row anchors the divider', plan.firstThirdPartyPosition === 5);
+check('divider anchors on the first plugin row in visual order',
+  plan.firstThirdPartyPosition === plan.groups[0].firstPosition,
+  String(plan.firstThirdPartyPosition) + ' vs ' + String(plan.groups[0].firstPosition));
+check('visual order is a dense step of ten',
+  plan.sequence.every((row, index) => row.visualOrder === 1 + index * 10));
 check('agent-presets is not treated as a plugin',
   plan.rows.find((r) => r.id === 'agent-presets').thirdParty === false);
 
@@ -134,13 +140,16 @@ check('every plugin row appears in exactly one group',
   plan.groups.reduce((sum, g) => sum + g.positions.length, 0) === plan.thirdPartyCount);
 check('each group starts at its first position',
   plan.groups.every((g) => g.positions[0] === g.firstPosition));
-check('group visual orders rise by ten',
-  plan.groups.every((g, index) => g.visualOrder === 100 + index * 10));
+check('official rows occupy the lowest visual orders',
+  plan.sequence.slice(0, plan.bandPositions.length).every((row) => row.thirdParty === false));
+check('plugin rows follow every official row',
+  plan.sequence.slice(plan.bandPositions.length).every((row) => row.thirdParty === true));
 const labels = {};
 plan.groups.forEach((g) => { labels[g.category] = categoryLabel(g.category, CONFIG, t); });
 const groupedCss = buildCss(plan, '插件提供 · 10', labels);
-check('every group is banded by order',
-  plan.groups.every((g) => groupedCss.includes('{order:' + g.visualOrder + '}')));
+check('every plugin row is banded by its own order',
+  plan.sequence.filter((row) => row.thirdParty)
+    .every((row) => groupedCss.includes(':nth-child(' + row.domPosition + '){order:' + row.visualOrder + '}')));
 check('later groups get a sub-caption',
   plan.groups.slice(1).every((g) => groupedCss.includes(':nth-child(' + g.firstPosition + ')::before')));
 check('the first plugin row keeps the band header',
@@ -184,6 +193,40 @@ check('replacement text is escaped', buildCss(
   planNav(FIXTURE, mergeConfig(CONFIG, { rename: { pet: 'a"b\\c' } })), 'x', {}
 ).includes('content:"a\\"b\\\\c"'));
 
+console.log('\n4b) per-entry position');
+
+/** Ids of one category's rows, in visual order. */
+const groupIds = (plan2, category) => (plan2.groups.find((g) => g.category === category) || { rows: [] })
+  .rows.map((row) => row.id);
+
+const petFirst = planNav(FIXTURE, mergeConfig(CONFIG, { position: { pet: 1 } }));
+check('an explicit position lifts a row to the front of its group',
+  groupIds(petFirst, petFirst.rows.find((r) => r.id === 'pet').category)[0] === 'pet',
+  groupIds(petFirst, petFirst.rows.find((r) => r.id === 'pet').category).join(','));
+
+const llmOrder = planNav(FIXTURE, mergeConfig(CONFIG, { position: { 'dsh-usage': 1, 'dshp-vision-bridge': 2 } }));
+check('two explicit positions order a group as asked',
+  groupIds(llmOrder, 'llm').join(',') === 'dsh-usage,dshp-vision-bridge',
+  groupIds(llmOrder, 'llm').join(','));
+
+const bandMoved = planNav(FIXTURE, mergeConfig(CONFIG, { position: { models: -100 } }));
+check('a positioned official entry moves inside the official band',
+  bandMoved.sequence[0].id === 'models',
+  bandMoved.sequence.slice(0, 5).map((row) => row.id).join(','));
+check('the official band keeps its size after a move',
+  bandMoved.bandPositions.length === plan.bandPositions.length);
+
+const untouched = planNav(FIXTURE, CONFIG);
+check('without overrides every group keeps registration order',
+  untouched.groups.every((group) => group.rows.every((row, index) => index === 0
+    || group.rows[index - 1].registeredAt <= row.registeredAt)));
+
+const positionedPanel = panelRows(FIXTURE, mergeConfig(CONFIG, { position: { pet: 1 } }));
+check('the panel lists rows in the navigation order',
+  positionedPanel.findIndex((row) => row.id === 'pet')
+    < positionedPanel.findIndex((row) => row.id === 'market'),
+  positionedPanel.map((row) => row.id).join(','));
+
 console.log('\n5) treat a plugin entry as shipped');
 const promoting = mergeConfig(CONFIG, { official: ['workbuddy-ai'] });
 const promoted = planNav(FIXTURE, promoting);
@@ -192,8 +235,12 @@ check('promoted row leaves the plugin band', workbuddy.thirdParty === false && w
 check('plugin count drops by one', promoted.thirdPartyCount === 9, String(promoted.thirdPartyCount));
 check('band count grows by one', promoted.bandPositions.length === 6, String(promoted.bandPositions.length));
 const promotedCss = buildCss(promoted, '插件提供 · 9', {});
-check('promoted row is never banded in the sheet',
-  !promotedCss.includes(':nth-child(5){order:'), promotedCss.split('\n')[1]);
+check('a promoted row sorts above every plugin row', (() => {
+  const promotedRow = promoted.sequence.find((row) => row.promoted === true);
+  const firstPlugin = promoted.sequence.find((row) => row.thirdParty === true);
+  return promotedRow !== undefined && firstPlugin !== undefined
+    && promotedRow.visualOrder < firstPlugin.visualOrder;
+})() && promotedCss.length > 0);
 check('promotion also matches a package name',
   planNav(FIXTURE, mergeConfig(CONFIG, { official: ['@linxin666/dsh-pet'] }))
     .rows.find((r) => r.id === 'pet').promoted === true);
@@ -268,6 +315,46 @@ check('a newly installed plugin re-plans the sheet',
   appends[0].textContent.includes('插件提供 · 11'),
   String(appends[0].textContent.split('\n').length) + ' rules');
 
+console.log('\n7b) draggable panel position');
+check('clamping keeps the panel inside the viewport',
+  JSON.stringify(clampPanelPosition({ left: -40, top: -40 }, { width: 600, height: 400 }, { width: 1200, height: 800 }))
+    === JSON.stringify({ left: 8, top: 8 }));
+check('clamping stops the panel leaving the far edge',
+  JSON.stringify(clampPanelPosition({ left: 5000, top: 5000 }, { width: 600, height: 400 }, { width: 1200, height: 800 }))
+    === JSON.stringify({ left: 592, top: 392 }),
+  JSON.stringify(clampPanelPosition({ left: 5000, top: 5000 }, { width: 600, height: 400 }, { width: 1200, height: 800 })));
+check('a panel larger than the viewport still gets a valid origin',
+  JSON.stringify(clampPanelPosition({ left: 300, top: 300 }, { width: 2000, height: 2000 }, { width: 800, height: 600 }))
+    === JSON.stringify({ left: 8, top: 8 }));
+
+/** In-memory localStorage double. */
+function memoryStorage(initial) {
+  const map = new Map(Object.entries(initial || {}));
+  return {
+    getItem: (key) => (map.has(key) ? map.get(key) : null),
+    setItem: (key, value) => { map.set(key, String(value)); },
+    removeItem: (key) => { map.delete(key); },
+    dump: () => Object.fromEntries(map)
+  };
+}
+const view = { localStorage: memoryStorage() };
+check('nothing is remembered initially', readPanelPosition(view) === null);
+check('writing remembers both axes', writePanelPosition(view, { left: 120, top: 64 }) === true
+  && readPanelPosition(view).left === 120 && readPanelPosition(view).top === 64);
+check('the position lives under its own key',
+  view.localStorage.dump()[PANEL_POSITION_KEY] !== undefined, Object.keys(view.localStorage.dump()).join(','));
+check('clearing forgets it', clearPanelPosition(view) === true && readPanelPosition(view) === null);
+check('malformed storage is ignored',
+  readPanelPosition({ localStorage: memoryStorage({ [PANEL_POSITION_KEY]: '{oops' }) }) === null);
+check('a half-written position is ignored',
+  readPanelPosition({ localStorage: memoryStorage({ [PANEL_POSITION_KEY]: '{"left":10}' }) }) === null);
+check('storage failures never throw', (() => {
+  const broken = { localStorage: { getItem() { throw new Error('denied'); },
+    setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } } };
+  return readPanelPosition(broken) === null && writePanelPosition(broken, { left: 1, top: 1 }) === false
+    && clearPanelPosition(broken) === false;
+})());
+
 console.log('\n8) config CLI (scripts/nav.mjs)');
 const sandbox = mkdtempSync(join(tmpdir(), 'nav-cli-'));
 const sandboxConfig = join(sandbox, 'nav-config.json');
@@ -298,6 +385,19 @@ try {
   check('nav switch turns the band split off', readSandbox().nav.banded === false);
   nav('nav', 'on');
   check('nav switch turns it back on', readSandbox().nav.banded === true);
+  nav('position', 'dsh-usage', '1');
+  check('position records a slot', readSandbox().position['dsh-usage'] === 1);
+  nav('unposition', 'dsh-usage');
+  check('unposition removes it', readSandbox().position['dsh-usage'] === undefined);
+  nav('category', 'add', 'mine', '我的分组');
+  check('category add appends to the order', readSandbox().grouping.order.includes('mine')
+    && readSandbox().grouping.labels.mine === '我的分组');
+  nav('assign', 'pet', 'mine');
+  nav('category', 'remove', 'mine');
+  check('category remove drops the order, label and assigns',
+    !readSandbox().grouping.order.includes('mine')
+    && readSandbox().grouping.labels.mine === undefined
+    && readSandbox().grouping.assign.pet === undefined);
   nav('grouping', 'off');
   check('grouping can be toggled off', readSandbox().grouping.enabled === false);
   nav('grouping', 'on');
@@ -443,6 +543,19 @@ check('trigger is a labelled button',
   && typeof triggerButtons[0].props.onClick === 'function',
   JSON.stringify(triggerNodes.map((n) => n.tag)));
 check('trigger paints its own icon', triggerNodes.some((n) => n.tag === 'svg'));
+
+const dragged = tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
+  .filter((n) => n.tag === 'div' && n.props.role === 'dialog')[0];
+check('the dialog is centred until it is moved', dragged.props.style === undefined);
+const head = tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
+  .filter((n) => n.tag === 'header')[0];
+check('the header is the drag handle',
+  typeof head.props.onPointerDown === 'function' && typeof head.props.onPointerMove === 'function'
+  && typeof head.props.onPointerUp === 'function');
+check('a recenter action exists',
+  tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
+    .filter((n) => n.tag === 'button').some((n) => n.props.title === '复位位置'));
+
 
 console.log('');
 if (failures > 0) {

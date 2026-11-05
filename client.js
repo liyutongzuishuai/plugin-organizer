@@ -15,6 +15,8 @@ window.__ModuleLoader__.load({
 
     /** localStorage key for a live override of nav-config.json. */
     const STORAGE_KEY = 'dsh-plugin-organizer:config';
+    /** Separate key: the remembered panel position is view state, not config. */
+    const PANEL_POSITION_KEY = 'dsh-plugin-organizer:panel-position';
 
     /* BAKED-CONFIG-START */
     const CONFIG = {
@@ -55,7 +57,8 @@ window.__ModuleLoader__.load({
       "official": [],
       "nav": {
         "banded": true
-      }
+      },
+      "position": {}
     };
     /* BAKED-CONFIG-END */
 
@@ -126,6 +129,7 @@ window.__ModuleLoader__.load({
       return {
         grouping: Object.assign({}, base.grouping, safe.grouping),
         nav: Object.assign({}, base.nav, safe.nav),
+        position: Object.assign({}, base.position, safe.position),
         rename: Object.assign({}, base.rename, safe.rename),
         official: Array.isArray(safe.official) ? safe.official : base.official
       };
@@ -145,13 +149,78 @@ window.__ModuleLoader__.load({
       return base;
     }
 
+    /** Explicit per-entry position, or undefined when the entry keeps its natural slot. */
+    function positionOf(config, id, registrant) {
+      const raw = lookup(config === undefined ? undefined : config.position, id, registrant);
+      const value = typeof raw === 'string' ? Number(raw) : raw;
+      return typeof value === 'number' && isFinite(value) ? value : undefined;
+    }
+
+    /** Keep a dragged panel on screen, with an 8px breathing edge. */
+    function clampPanelPosition(position, size, viewport) {
+      const edge = 8;
+      const maxLeft = Math.max(edge, (viewport.width || 0) - (size.width || 0) - edge);
+      const maxTop = Math.max(edge, (viewport.height || 0) - (size.height || 0) - edge);
+      const left = Math.min(Math.max(edge, Number(position.left) || 0), maxLeft);
+      const top = Math.min(Math.max(edge, Number(position.top) || 0), maxTop);
+      return { left: left, top: top };
+    }
+
+    /** Read the remembered panel position, or null when none (or malformed). */
+    function readPanelPosition(view) {
+      try {
+        const scope = view === undefined ? globalThis : view;
+        const storage = scope === null || scope === undefined ? undefined : scope.localStorage;
+        const raw = storage === undefined ? null : storage.getItem(PANEL_POSITION_KEY);
+        if (typeof raw !== 'string' || raw.length === 0) return null;
+        const parsed = JSON.parse(raw);
+        if (typeof parsed.left !== 'number' || typeof parsed.top !== 'number') return null;
+        if (!isFinite(parsed.left) || !isFinite(parsed.top)) return null;
+        return { left: parsed.left, top: parsed.top };
+      } catch (error) {
+        return null;
+      }
+    }
+
+    /** Remember the panel position; a failure here must never break the panel. */
+    function writePanelPosition(view, position) {
+      try {
+        const scope = view === undefined ? globalThis : view;
+        const storage = scope === null || scope === undefined ? undefined : scope.localStorage;
+        if (storage === undefined) return false;
+        storage.setItem(PANEL_POSITION_KEY, JSON.stringify({ left: position.left, top: position.top }));
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    /** Forget the remembered position so the panel recentres. */
+    function clearPanelPosition(view) {
+      try {
+        const scope = view === undefined ? globalThis : view;
+        const storage = scope === null || scope === undefined ? undefined : scope.localStorage;
+        if (storage !== undefined) storage.removeItem(PANEL_POSITION_KEY);
+        return true;
+      } catch (error) {
+        return false;
+      }
+    }
+
     /**
      * Project ledger entries into the nav plan.
-     * Rows keep the shell's registration order inside their band; grouping only
-     * decides the CSS `order` each row receives, so nothing moves in the DOM.
+     *
+     * Two orders are computed. The first is the DOM order the shell renders:
+     * a stable sort by registration `order`, which fixes every row's
+     * `nth-child` position. The second is the visual order this plugin asks
+     * for: official rows first, then each configured category, with an
+     * explicit `position` value winning inside each band and registration
+     * order breaking ties. Every row receives the CSS `order` that lands it on
+     * its visual index, so nothing has to move in the DOM.
+     *
      * @param entries - live `settings.section` entries.
      * @param config - effective config.
-     * @returns plan with band and group membership, plus renames per row.
+     * @returns plan with DOM positions, visual order, and group membership.
      */
     function planNav(entries, config) {
       const cfg = config === undefined ? CONFIG : config;
@@ -174,57 +243,76 @@ window.__ModuleLoader__.load({
           thirdParty: thirdParty,
           promoted: listed && isThirdParty(list[i]),
           category: categoryOf(id, registrant, cfg),
-          rename: lookup(cfg.rename, id, registrant)
+          rename: lookup(cfg.rename, id, registrant),
+          explicitPosition: positionOf(cfg, id, registrant),
+          domPosition: 0,
+          visualOrder: 0
         });
       }
       rows.sort((a, b) => (a.order - b.order) || (a.registeredAt - b.registeredAt));
+      for (let i = 0; i < rows.length; i += 1) rows[i].domPosition = i + 1;
+
+      const byExplicit = (a, b) => {
+        const left = a.explicitPosition === undefined ? Number.POSITIVE_INFINITY : a.explicitPosition;
+        const right = b.explicitPosition === undefined ? Number.POSITIVE_INFINITY : b.explicitPosition;
+        return (left - right) || (a.registeredAt - b.registeredAt);
+      };
+
+      const band = rows.filter((row) => !row.thirdParty).sort(byExplicit);
 
       const declared = Array.isArray(grouping.order) && grouping.order.length > 0
         ? grouping.order
         : ['other'];
       const rank = new Map();
       for (let i = 0; i < declared.length; i += 1) rank.set(declared[i], i);
-
-      const groups = [];
       const byCategory = new Map();
-      const bandPositions = [];
-      let firstThirdPartyPosition = 0;
-      let thirdPartyCount = 0;
-      let promotedCount = 0;
       for (let i = 0; i < rows.length; i += 1) {
         const row = rows[i];
-        const position = i + 1;
-        if (!row.thirdParty) {
-          bandPositions.push(position);
-          if (row.promoted) promotedCount += 1;
-          continue;
-        }
-        thirdPartyCount += 1;
-        if (firstThirdPartyPosition === 0) firstThirdPartyPosition = position;
-        if (!byCategory.has(row.category)) {
-          const group = {
-            category: row.category,
-            rank: rank.has(row.category) ? rank.get(row.category) : declared.length + 1,
-            positions: [],
-            firstPosition: 0
-          };
-          byCategory.set(row.category, group);
-          groups.push(group);
-        }
-        const group = byCategory.get(row.category);
-        group.positions.push(position);
-        if (group.firstPosition === 0) group.firstPosition = position;
+        if (!row.thirdParty) continue;
+        if (!byCategory.has(row.category)) byCategory.set(row.category, []);
+        byCategory.get(row.category).push(row);
       }
+      const groups = [];
+      byCategory.forEach((categoryRows, category) => {
+        groups.push({
+          category: category,
+          rank: rank.has(category) ? rank.get(category) : declared.length + 1,
+          rows: categoryRows.slice().sort(byExplicit),
+          domPositions: categoryRows.map((row) => row.domPosition)
+        });
+      });
       groups.sort((a, b) => a.rank - b.rank);
+
+      const sequence = band.slice();
       for (let i = 0; i < groups.length; i += 1) {
-        groups[i].visualOrder = 100 + i * 10;
+        for (let j = 0; j < groups[i].rows.length; j += 1) sequence.push(groups[i].rows[j]);
       }
+      for (let i = 0; i < sequence.length; i += 1) sequence[i].visualOrder = 1 + i * 10;
+
+      for (let i = 0; i < groups.length; i += 1) {
+        const group = groups[i];
+        group.positions = group.domPositions;
+        group.firstPosition = group.rows.length === 0 ? 0 : group.rows[0].domPosition;
+      }
+
+      let firstThirdPartyPosition = 0;
+      for (let i = 0; i < sequence.length; i += 1) {
+        if (sequence[i].thirdParty) {
+          firstThirdPartyPosition = sequence[i].domPosition;
+          break;
+        }
+      }
+
+      let promotedCount = 0;
+      for (let i = 0; i < rows.length; i += 1) if (rows[i].promoted) promotedCount += 1;
+
       return {
         rows: rows,
-        bandPositions: bandPositions,
+        sequence: sequence,
+        bandPositions: band.map((row) => row.domPosition),
         groups: groups,
         firstThirdPartyPosition: firstThirdPartyPosition,
-        thirdPartyCount: thirdPartyCount,
+        thirdPartyCount: rows.length - band.length,
         promotedCount: promotedCount,
         groupingEnabled: grouping.enabled !== false,
         navBanded: !(cfg.nav !== undefined && cfg.nav !== null && cfg.nav.banded === false)
@@ -247,9 +335,10 @@ window.__ModuleLoader__.load({
     /**
      * Build the stylesheet for one plan.
      *
-     * Ordering is flex `order` on the nav list's children; captions and renames
-     * are pseudo-elements on the affected row, because Chromium ignores `order`
-     * on a flex container's generated `::after`.
+     * Every row gets the CSS `order` that lands it on its visual index, so
+     * explicit per-entry positions work without touching the DOM. Captions are
+     * pseudo-elements on the affected row, because Chromium ignores `order` on
+     * a flex container's generated `::after`.
      *
      * @param plan - result of {@link planNav}.
      * @param headerLabel - band caption, already localized and counted.
@@ -264,16 +353,14 @@ window.__ModuleLoader__.load({
       const list = '[data-shortcut-modal="settings"] [class*="navList"]';
       const children = list + '>*';
       const at = (position) => children + ':nth-child(' + String(position) + ')';
-      const rules = [children + '{order:1}'];
+      const rules = [];
 
-      for (let i = 0; i < plan.groups.length; i += 1) {
-        const group = plan.groups[i];
-        rules.push(group.positions.map(at).join(',') + '{order:' + String(group.visualOrder) + '}');
+      for (let i = 1; i < plan.sequence.length; i += 1) {
+        const row = plan.sequence[i];
+        if (row.visualOrder === 1) continue;
+        rules.push(at(row.domPosition) + '{order:' + String(row.visualOrder) + '}');
       }
 
-      // The band header belongs to the FIRST VISUAL group's first row. Using the
-      // first third-party row in DOM order would collide with that row's own
-      // group caption whenever visual grouping reorders it (the later rule wins).
       const headerRow = at(plan.groups[0].firstPosition);
       rules.push(headerRow + '{margin-top:34px;border-top:0.5px solid var(--dsw-alias-border-l2);position:relative}');
       rules.push(captionRule(headerRow, headerLabel, '-20px'));
@@ -291,7 +378,7 @@ window.__ModuleLoader__.load({
       for (let i = 0; i < plan.rows.length; i += 1) {
         const row = plan.rows[i];
         if (typeof row.rename !== 'string' || row.rename.length === 0) continue;
-        const selector = at(i + 1);
+        const selector = at(row.domPosition);
         // Hide the shell's own label and draw the replacement in its place.
         rules.push(selector + ' [class*="navLabel"]{display:none}');
         rules.push(selector + '::after{content:"' + cssString(row.rename) + '"'
@@ -317,7 +404,8 @@ window.__ModuleLoader__.load({
       panelEmpty: '还没有插件添加设置入口。',
       panelEmptySearch: '没有匹配的入口。',
       panelPromoted: '已归入官方',
-      panelHint: '点击左侧「设置」中的同名条目即可进入对应页面。'
+      panelRecenter: '复位位置',
+      panelHint: '拖动标题可移动面板；点击左侧「设置」中的同名条目即可进入对应页面。'
     };
     const en = {
       navGroup: 'From plugins',
@@ -334,7 +422,8 @@ window.__ModuleLoader__.load({
       panelEmpty: 'No plugin has added a settings entry yet.',
       panelEmptySearch: 'No matching entries.',
       panelPromoted: 'In the shipped band',
-      panelHint: 'Open Settings and pick the matching entry on the left to jump there.'
+      panelRecenter: 'Reset position',
+      panelHint: 'Drag the title to move this panel. Open Settings and pick the matching entry on the left to jump there.'
     };
 
     /** Category caption for one id, preferring the config's own labels. */
@@ -478,10 +567,57 @@ window.__ModuleLoader__.load({
       const setCollapsed = collapsedState[1];
       const panelRef = React.useRef(null);
       const titleId = React.useId();
+      const posState = React.useState(() => readPanelPosition(globalThis));
+      const position = posState[0];
+      const setPosition = posState[1];
+      const draggingState = React.useState(false);
+      const dragging = draggingState[0];
+      const setDragging = draggingState[1];
+      const dragRef = React.useRef(null);
+      const positionRef = React.useRef(position);
       // Keep the panel mounted briefly after close so it can animate out.
       const visibleState = React.useState(open);
       const visible = visibleState[0];
       const setVisible = visibleState[1];
+
+      React.useEffect(() => { positionRef.current = position; }, [position]);
+
+      const onDragStart = (event) => {
+        const node = panelRef.current;
+        if (node === null || node === undefined) return;
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+        const rect = node.getBoundingClientRect();
+        dragRef.current = {
+          dx: event.clientX - rect.left,
+          dy: event.clientY - rect.top,
+          width: rect.width,
+          height: rect.height
+        };
+        setDragging(true);
+        if (typeof event.currentTarget.setPointerCapture === 'function') {
+          try { event.currentTarget.setPointerCapture(event.pointerId); } catch (error) { /* pointer capture is best effort */ }
+        }
+      };
+      const onDragMove = (event) => {
+        const drag = dragRef.current;
+        if (drag === null || drag === undefined) return;
+        setPosition(clampPanelPosition(
+          { left: event.clientX - drag.dx, top: event.clientY - drag.dy },
+          { width: drag.width, height: drag.height },
+          { width: globalThis.innerWidth, height: globalThis.innerHeight }
+        ));
+      };
+      const onDragEnd = () => {
+        if (dragRef.current === null || dragRef.current === undefined) return;
+        dragRef.current = null;
+        setDragging(false);
+        const settled = positionRef.current;
+        if (settled !== null && settled !== undefined) writePanelPosition(globalThis, settled);
+      };
+      const recenter = () => {
+        clearPanelPosition(globalThis);
+        setPosition(null);
+      };
 
       React.useEffect(() => {
         if (open) {
@@ -536,13 +672,31 @@ window.__ModuleLoader__.load({
           'aria-modal': 'true',
           'aria-labelledby': titleId,
           tabIndex: -1,
-          ref: panelRef
+          ref: panelRef,
+          'data-dragging': dragging ? 'true' : 'false',
+          style: position === null || position === undefined
+            ? undefined
+            : { position: 'absolute', left: String(position.left) + 'px', top: String(position.top) + 'px' }
         },
-          h('header', { className: 'po-head' },
+          h('header', {
+            className: 'po-head',
+            onPointerDown: onDragStart,
+            onPointerMove: onDragMove,
+            onPointerUp: onDragEnd,
+            onPointerCancel: onDragEnd
+          },
             h('div', { className: 'po-head-text' },
               h('h2', { className: 'po-title', id: titleId }, t('panelTitle')),
               h('p', { className: 'po-subtitle' }, t('panelSubtitle'))),
             h('span', { className: 'po-count' }, t('panelCount').split('{count}').join(String(all.length))),
+            h('button', {
+              type: 'button', className: 'po-close', 'aria-label': t('panelRecenter'), title: t('panelRecenter'),
+              onClick: recenter
+            }, h('svg', { viewBox: '0 0 16 16', width: 14, height: 14, 'aria-hidden': true },
+              h('path', {
+                d: 'M8 2.5L8 8M8 8L5.2 5.2M8 8L10.8 5.2M2.5 13.5h11', stroke: 'currentColor',
+                strokeWidth: 1.4, strokeLinecap: 'round', fill: 'none'
+              }))),
             h('button', {
               type: 'button', className: 'po-close', 'aria-label': t('panelClose'),
               onClick: () => props.store.set(false)
@@ -607,7 +761,9 @@ window.__ModuleLoader__.load({
       '.po-mask{position:absolute;inset:0;background:var(--dsw-alias-bg-mask-1,rgba(0,0,0,.45));backdrop-filter:blur(2px);animation:po-fade 180ms var(--po-ease) both}',
       '.po-panel{position:relative;display:flex;flex-direction:column;width:min(640px,calc(100vw - 48px));max-height:min(76vh,720px);border:0.5px solid var(--dsw-alias-border-l3,rgba(255,255,255,.16));border-radius:16px;background:var(--dsw-alias-bg-layer-2,#1b1b1e);box-shadow:0 18px 60px rgba(0,0,0,.45);color:var(--dsw-alias-label-primary,#f2f2f3);overflow:hidden;animation:po-rise 240ms var(--po-ease) both}',
       '.po-panel:focus{outline:none}',
-      '.po-head{display:flex;align-items:flex-start;gap:12px;padding:18px 18px 12px}',
+      '.po-head{display:flex;align-items:flex-start;gap:12px;padding:18px 18px 12px;cursor:grab;touch-action:none;user-select:none}',
+      '.po-panel[data-dragging="true"] .po-head{cursor:grabbing}',
+      '.po-panel[data-dragging="true"]{transition:none}',
       '.po-head-text{flex:1 1 auto;min-width:0}',
       '.po-title{margin:0;font-size:16px;line-height:24px;font-weight:600;letter-spacing:.01em}',
       '.po-subtitle{margin:2px 0 0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary,#8b8b90)}',
@@ -771,6 +927,11 @@ window.__ModuleLoader__.load({
         planNav: planNav,
         buildCss: buildCss,
         createOpenStore: createOpenStore,
+        PANEL_POSITION_KEY: PANEL_POSITION_KEY,
+        clampPanelPosition: clampPanelPosition,
+        readPanelPosition: readPanelPosition,
+        writePanelPosition: writePanelPosition,
+        clearPanelPosition: clearPanelPosition,
         panelRows: panelRows,
         panelGroups: panelGroups,
         filterPanelRows: filterPanelRows,

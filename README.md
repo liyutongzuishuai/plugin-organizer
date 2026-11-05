@@ -76,6 +76,8 @@ https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/market/
   170ms 淡出后卸载（期间不再接收点击）；分组折叠用 `grid-template-rows` 过渡 220ms；
   `prefers-reduced-motion: reduce` 时全部关闭
 - 键盘：`Esc` 关闭、打开时焦点进入面板；`role="dialog"` + `aria-modal` + 标题关联
+- **可拖动**：拖标题移动面板，松手后位置存进 `localStorage`（键 `dsh-plugin-organizer:panel-position`），
+  重开仍在原处；位置会被钳制在视口内（四周留 8px）；标题右侧「复位位置」按钮清除记忆回到居中
 - 面板内改名与分组复用 `nav-config.json` 的 `rename` / `grouping`，被提升的入口显示「已归入官方」标记
 
 面板是总览：点卡片不会跳转（宿主没有暴露切换设置页的服务），底部提示告诉你在左侧设置里点同名条目。
@@ -89,6 +91,8 @@ https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/market/
 node scripts/nav.mjs official workbuddy-ai     # 把某条第三方入口提到官方区
 node scripts/nav.mjs rename dsh-usage 用量统计   # 改名
 node scripts/nav.mjs assign pet settings        # 指定分组（section id 或包名）
+node scripts/nav.mjs position dsh-usage 1       # 指定它在所属分组里的第几位（1 = 最前）
+node scripts/nav.mjs category add mine 我的分组   # 新建分组（会自动排到最后）
 node scripts/nav.mjs label settings 设置入口      # 改分组标题
 node scripts/nav.mjs order ui,settings,tools    # 调整分组顺序
 node scripts/nav.mjs grouping off               # 关掉分组
@@ -96,6 +100,11 @@ node scripts/nav.mjs show                       # 看当前配置
 ```
 
 `unassign` / `unrename` / `unofficial` 是对应的撤销命令。
+
+`position` 接受任意数字，作用范围是**它所属的那一段**：官方区的条目和官方区比，插件条目和同组比；
+没写 `position` 的条目排在写了之后，彼此保持插件自己的注册顺序。`unposition` 恢复自然位置。
+
+`category add` 新建分组后，用 `assign` 把条目放进去；`category remove` 会同时清理顺序、标题和指向它的归类。
 
 另外可用 `node scripts/nav.mjs nav off` 关掉**导航内的分区改写**——那一层依赖宿主类名，
 是最薄弱的部分；关掉后只保留完全独立的面板。默认开启。也可以直接编辑仓库根的
@@ -106,6 +115,7 @@ node scripts/nav.mjs show                       # 看当前配置
 ```jsonc
 {
   "nav": { "banded": true },     // false = 不再改写导航，只用面板
+  "position": { "pet": 1 },      // 逐项定位：官方区/分组内第几位
   "grouping": {
     "enabled": true,              // false = 插件区不再按类分组
     "order": ["ui", "settings"],  // 分组顺序

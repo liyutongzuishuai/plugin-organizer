@@ -8,6 +8,10 @@
  *   node scripts/nav.mjs show
  *   node scripts/nav.mjs grouping on|off
  *   node scripts/nav.mjs nav on|off                       # in-navigation band split
+ *   node scripts/nav.mjs position <section-id|package> <n>   # slot inside its band (1 = first)
+ *   node scripts/nav.mjs unposition <section-id|package>
+ *   node scripts/nav.mjs category add <id> <caption>        # new category
+ *   node scripts/nav.mjs category remove <id>
  *   node scripts/nav.mjs assign <section-id|package> <category>
  *   node scripts/nav.mjs unassign <section-id|package>
  *   node scripts/nav.mjs rename <section-id|package> <display name>
@@ -59,6 +63,7 @@ function load() {
   parsed.grouping.labels = parsed.grouping.labels ?? {};
   parsed.grouping.assign = parsed.grouping.assign ?? {};
   parsed.nav = parsed.nav ?? {};
+  parsed.position = parsed.position ?? {};
   if (parsed.nav.banded === undefined) parsed.nav.banded = true;
   parsed.rename = parsed.rename ?? {};
   parsed.official = Array.isArray(parsed.official) ? parsed.official : [];
@@ -110,6 +115,45 @@ switch (command) {
     config.nav.banded = value === 'on';
     changed = true;
     console.log('navigation band split ' + value);
+    break;
+  }
+  case 'position': {
+    const key = need(rest[0], 'section id or package');
+    const raw = need(rest[1], 'position');
+    const value = Number(raw);
+    if (!Number.isFinite(value)) throw new Error('position must be a number');
+    config.position[key] = value;
+    changed = true;
+    console.log(key + ' → position ' + value);
+    break;
+  }
+  case 'unposition': {
+    const key = need(rest[0], 'section id or package');
+    delete config.position[key];
+    changed = true;
+    console.log(key + ' → natural position');
+    break;
+  }
+  case 'category': {
+    const action = need(rest[0], 'add|remove');
+    const id = need(rest[1], 'category id');
+    if (action === 'add') {
+      const caption = rest.length > 2 ? need(rest.slice(2).join(' '), 'caption') : id;
+      ensureCategory(config, id);
+      config.grouping.labels[id] = caption;
+      if (config.grouping.order.indexOf(id) === -1) config.grouping.order.push(id);
+      console.log('category ' + id + ' → ' + caption);
+    } else if (action === 'remove') {
+      config.grouping.order = config.grouping.order.filter((item) => item !== id);
+      delete config.grouping.labels[id];
+      for (const key of Object.keys(config.grouping.assign)) {
+        if (config.grouping.assign[key] === id) delete config.grouping.assign[key];
+      }
+      console.log('category ' + id + ' removed');
+    } else {
+      throw new Error('category expects add or remove');
+    }
+    changed = true;
     break;
   }
   case 'assign': {
@@ -178,7 +222,7 @@ switch (command) {
     break;
   }
   default: {
-    console.error('usage: node scripts/nav.mjs <show|nav|grouping|assign|unassign|rename|unrename|official|unofficial|label|order> [args]');
+    console.error('usage: node scripts/nav.mjs <show|nav|grouping|position|category|assign|unassign|rename|unrename|official|unofficial|label|order> [args]');
     process.exit(2);
   }
 }
