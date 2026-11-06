@@ -78,9 +78,14 @@ https://raw.githubusercontent.com/liyutongzuishuai/plugin-organizer/main/market/
 - 键盘：`Esc` 关闭、打开时焦点进入面板；`role="dialog"` + `aria-modal` + 标题关联
 - **可拖动（窗口）**：拖标题移动面板，松手后位置存进 `localStorage`（键 `dsh-plugin-organizer:panel-position`），
   重开仍在原处；位置被钳制在视口内（四周留 8px）；标题右侧「复位位置」按钮清除记忆回到居中
-- **可拖动（卡片）**：直接拖面板里的卡片就能改同一分组内的先后顺序；拖动时被拖卡片抬升、目标位置出现强调线，
-  松手后顺序写进 `localStorage` 的 `position` 覆盖并立即重写导航样式，设置里的顺序同步变化。
-  跨分组移动请用 `assign`（拖动只在同一分组内重排）
+- **可拖动（卡片）**：直接拖卡片就能改分组和组内顺序。同组拖动时被拖卡片抬升、目标位置出现强调线，
+  松手写 `localStorage` 的 `position` 覆盖；拖到别的分组即改归属，目标分组整块高亮，落下后写 `assign`
+  覆盖并自动展开目标组。拖回它的「自然分类」（关键词判定的那个分组）等于撤销人工归属。
+- **可拖动（分组）**：拖分组标题调整分类先后，落点分组高亮；松手写 `grouping.order` 覆盖，导航层的
+  分组顺序同步变化。点一下（位移不超过 4px）仍是折叠/展开。
+- 底部在有拖动记录时出现「重置拖动记录」，清掉拖动写入的 `assign` / `grouping.order` / `position`
+  三类覆盖，回到 `nav-config.json` 的配置；改名、提升等其它覆盖不受影响。
+- 搜索框有内容时两种拖动都停用——过滤后的列表是子集，重排或改归属会写出残缺顺序。
 - 面板内改名与分组复用 `nav-config.json` 的 `rename` / `grouping`，被提升的入口显示「已归入官方」标记
 
 面板是总览：点卡片不会跳转（宿主没有暴露切换设置页的服务），底部提示告诉你在左侧设置里点同名条目。
@@ -138,7 +143,7 @@ node scripts/nav.mjs show                       # 看当前配置
 - **重命名**：隐藏宿主原本的标签，按配置绘制新名字，只影响显示。
 - **当成官方**：被列出的入口按官方规则排序（`order: 1`），出现在分割线上方的官方带里，计数随之减少。
 
-临时试验可以不改文件，直接把覆盖写进浏览器：
+临时试验可以不改文件，直接把覆盖写进浏览器（面板的拖动写的就是同一个键）：
 
 ```js
 localStorage.setItem('dsh-plugin-organizer:config',
@@ -146,21 +151,28 @@ localStorage.setItem('dsh-plugin-organizer:config',
 // 想撤销：localStorage.removeItem('dsh-plugin-organizer:config')
 ```
 
-`localStorage` 覆盖只合并 `grouping` / `rename` / `official` 三项，刷新页面生效；写坏 JSON 会被忽略，不会影响设置面板。
+覆盖按配置块合并：`grouping.assign` 与 `grouping.labels` 按条目深合并（只写一条不会冲掉
+`nav-config.json` 里的其它条目），`position` / `rename` 同样按条目合并，`grouping.order`、
+`grouping.enabled` 与 `official` 整体替换。面板拖动写的就是其中三类：`assign`（跨组改归属；拖回自然
+分类时记 `null`，表示撤销人工归属）、`position`（组内顺序）和 `grouping.order`（分类顺序）。
+底部「重置拖动记录」会把这三类键从覆盖里删掉，回到烘焙配置。
+
+覆盖只存在当前浏览器，换浏览器或清站点数据就回到 `nav-config.json`；写坏 JSON 会被忽略，
+不会影响设置面板。
 
 ## 开发与测试
 
 ```bash
 node --check client.js
 node scripts/build-config.mjs --check   # 配置与 client.js 是否同步
-node test-organizer.mjs                 # 分组 / 重命名 / 提升 / 样式 / 自动重算
+node test-organizer.mjs                 # 分组 / 重命名 / 提升 / 拖动改分类 / 样式 / 自动重算
 ```
 
 主要文件：
 
 | 文件 | 作用 |
 |---|---|
-| `client.js` | 浏览器端：`isThirdParty()` 判定来源、`planNav()` 计算导航位次、`buildCss()` 生成样式 |
+| `client.js` | 浏览器端：`isThirdParty()` 判定来源、`planNav()` 计算导航位次、`buildCss()` 生成样式、`planDrop()` / `reorderCategories()` 处理拖动 |
 | `index.js` | 宿主端空实现（占位 Loader 行） |
 | `cordis.patch.yml` | Loader 插入行 |
 | `locale/{zh,en}.json` | 插件标题与描述 |

@@ -70,7 +70,8 @@ const {
   filterPanelRows, PanelTrigger, OrganizerPanel, PANEL_CSS,
   clampPanelPosition, readPanelPosition, writePanelPosition, clearPanelPosition,
   PANEL_POSITION_KEY, reorderIds, positionsForOrder, dropIndexAt, writePositionOverride,
-  readOverride
+  readOverride, planDrop, reorderCategories, writeDropOverride, writeOrderOverride,
+  hasDropOverrides, clearDropOverrides
 } = registered.__internals;
 
 let failures = 0;
@@ -114,6 +115,20 @@ check('readConfig ignores malformed storage', (() => {
   const scope = { localStorage: { getItem: () => '{not json' } };
   return readConfig(scope).grouping.enabled === CONFIG.grouping.enabled;
 })());
+check('a live override merges into the baked category maps', (() => {
+  const merged = mergeConfig(CONFIG, { grouping: { assign: { pet: 'tools' } } });
+  return merged.grouping.assign.pet === 'tools'
+    && merged.grouping.order.length === CONFIG.grouping.order.length
+    && merged.grouping.labels.ui === CONFIG.grouping.labels.ui;
+})());
+check('an explicit null assignment wins over a baked one', (() => {
+  const baked = mergeConfig(CONFIG, { grouping: { assign: { pet: 'tools' } } });
+  const merged = mergeConfig(baked, { grouping: { assign: { pet: null } } });
+  return merged.grouping.assign.pet === null
+    && categoryOf('pet', '@linxin666/dsh-pet', merged) === 'other';
+})());
+check('a non-object section never breaks the merge',
+  mergeConfig(CONFIG, { grouping: 'broken' }).grouping.order.length === CONFIG.grouping.order.length);
 
 console.log('\n2) band split (default config)');
 const plan = planNav(FIXTURE, CONFIG);
@@ -404,6 +419,91 @@ check('a reorder survives a corrupt override', (() => {
   return writePositionOverride(scope, { pet: 2 }) === true && readOverride(scope).position.pet === 2;
 })());
 
+console.log('\n7d) drag to recategorize and to reorder the categories');
+check('a same-group drop only reorders', (() => {
+  const plan = planDrop({ id: 'b', from: 'ui', to: 'ui', targetIds: ['a', 'c'], index: 0, natural: 'ui' });
+  return plan.assign === undefined
+    && JSON.stringify(plan.positions) === JSON.stringify({ b: 1, a: 2, c: 3 });
+})());
+check('a cross-group drop assigns the destination category', (() => {
+  const plan = planDrop({ id: 'b', from: 'ui', to: 'tools', targetIds: ['x', 'y'], index: 1, natural: 'ui' });
+  return plan.assign === 'tools'
+    && JSON.stringify(plan.positions) === JSON.stringify({ x: 1, b: 2, y: 3 });
+})());
+check('dropping on the natural category undoes the assignment', (() => {
+  const plan = planDrop({ id: 'b', from: 'tools', to: 'ui', targetIds: ['a'], index: 1, natural: 'ui' });
+  return plan.assign === null && plan.positions.a === 1 && plan.positions.b === 2;
+})());
+check('a drop index is clamped to the destination', (() => {
+  const plan = planDrop({ id: 'b', from: 'ui', to: 'tools', targetIds: ['x'], index: 99, natural: 'other' });
+  return plan.positions.x === 1 && plan.positions.b === 2;
+})());
+check('the dragged card is never duplicated in the destination', (() => {
+  const plan = planDrop({ id: 'x', from: 'ui', to: 'tools', targetIds: ['x', 'y'], index: 0, natural: 'other' });
+  return Object.keys(plan.positions).join(',') === 'x,y';
+})());
+check('category reorder keeps the groups that are not on screen in place', (() => {
+  const next = reorderCategories(['ui', 'settings', 'tools', 'llm'], ['ui', 'tools', 'llm'], ['llm', 'ui', 'tools']);
+  return next.join(',') === 'llm,settings,ui,tools';
+})());
+check('an undeclared visible category is appended', (() => {
+  const next = reorderCategories(['ui'], ['ui', 'zz'], ['zz', 'ui']);
+  return next.join(',') === 'zz,ui';
+})());
+check('a no-op category reorder is stable', (() => {
+  const order = ['ui', 'settings', 'tools'];
+  const next = reorderCategories(order, ['ui', 'tools'], ['ui', 'tools']);
+  return next.join(',') === order.join(',') && next !== order;
+})());
+
+const dropView = { localStorage: memoryStorage() };
+check('a drag writes the assignment incrementally', (() => {
+  const ok = writeDropOverride(dropView, { id: 'pet', assign: 'tools', positions: { pet: 1 } });
+  const stored = readOverride(dropView);
+  return ok === true && stored.grouping.assign.pet === 'tools' && stored.position.pet === 1
+    && stored.grouping.assign['@linxin666/dsh-pet'] === undefined;
+})());
+check('a second drag keeps the earlier assignment', (() => {
+  writeDropOverride(dropView, { id: 'market', assign: 'ui', positions: { market: 2 } });
+  const stored = readOverride(dropView);
+  return stored.grouping.assign.pet === 'tools' && stored.grouping.assign.market === 'ui'
+    && stored.position.pet === 1 && stored.position.market === 2;
+})());
+check('a same-group reorder leaves the assignment map alone', (() => {
+  const scope = { localStorage: memoryStorage() };
+  writeDropOverride(scope, { id: 'pet', assign: 'tools' });
+  writeDropOverride(scope, { id: 'pet', positions: { a: 1 } });
+  return readOverride(scope).grouping.assign.pet === 'tools'
+    && readOverride(scope).position.a === 1;
+})());
+check('an unassignment is recorded as null and falls back to the keywords', (() => {
+  const scope = { localStorage: memoryStorage() };
+  writeDropOverride(scope, { id: 'pet', assign: 'tools' });
+  writeDropOverride(scope, { id: 'pet', assign: null });
+  return readOverride(scope).grouping.assign.pet === null
+    && categoryOf('pet', '@linxin666/dsh-pet', readConfig(scope)) === 'other';
+})());
+check('a dragged category order is persisted as an override', (() => {
+  const scope = { localStorage: memoryStorage() };
+  return writeOrderOverride(scope, ['llm', 'ui']) === true
+    && readConfig(scope).grouping.order.join(',') === 'llm,ui';
+})());
+check('drag changes can be reset without losing renames', (() => {
+  const scope = { localStorage: memoryStorage({ 'dsh-plugin-organizer:config': JSON.stringify({ rename: { pet: '萌宠' } }) }) };
+  writeDropOverride(scope, { id: 'pet', assign: 'tools', positions: { pet: 1 } });
+  writeOrderOverride(scope, ['llm', 'ui']);
+  const before = hasDropOverrides(scope);
+  const cleared = clearDropOverrides(scope);
+  const stored = readOverride(scope);
+  return before === true && cleared === true && stored.rename.pet === '萌宠'
+    && stored.position === undefined && stored.grouping === undefined;
+})());
+check('a corrupt override never breaks a drag', (() => {
+  const scope = { localStorage: memoryStorage({ 'dsh-plugin-organizer:config': 'not json' }) };
+  return writeDropOverride(scope, { id: 'pet', assign: 'tools' }) === true
+    && readOverride(scope).grouping.assign.pet === 'tools';
+})());
+
 console.log('\n8) config CLI (scripts/nav.mjs)');
 const sandbox = mkdtempSync(join(tmpdir(), 'nav-cli-'));
 const sandboxConfig = join(sandbox, 'nav-config.json');
@@ -609,6 +709,40 @@ check('cards carry their drag identity',
 check('a recenter action exists',
   tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
     .filter((n) => n.tag === 'button').some((n) => n.props.title === '复位位置'));
+
+const panelRoot = tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
+  .filter((n) => n.tag === 'div' && n.props.className === 'po-root')[0];
+check('the panel exposes its search state to the drag layers',
+  panelRoot.props['data-searching'] === 'false', String(panelRoot.props['data-searching']));
+check('cards remember the category the keywords would give them',
+  tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
+    .filter((n) => n.tag === 'article')
+    .every((n) => typeof n.props['data-natural'] === 'string' && n.props['data-natural'].length > 0),
+  'natural category missing');
+check('a group header advertises the category reorder drag',
+  tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
+    .filter((n) => n.tag === 'button' && n.props.className === 'po-group-head')
+    .some((n) => n.props.title === '拖动调整分类顺序'));
+check('panel css highlights a drop-target group', PANEL_CSS.includes('.po-group[data-drop-target="true"]'));
+check('panel css draws the category insertion line',
+  PANEL_CSS.includes('.po-group[data-drop-before="true"]') && PANEL_CSS.includes('.po-group[data-drop-after="true"]'));
+check('panel css marks the dragged group', PANEL_CSS.includes('.po-group[data-dragging="true"]'));
+check('panel css styles the reset action', PANEL_CSS.includes('.po-reset:hover'));
+check('the reset action appears exactly when drag changes exist', (() => {
+  const previous = globalThis.localStorage;
+  globalThis.localStorage = memoryStorage();
+  try {
+    const find = () => tags(OrganizerPanel({ ...panelProps, store: createOpenStore(true) }))
+      .filter((n) => n.tag === 'button' && n.props.className === 'po-reset');
+    const empty = find().length;
+    writeDropOverride(globalThis, { id: 'pet', assign: 'tools' });
+    const filled = find();
+    return empty === 0 && filled.length === 1 && filled[0].props.title === '重置拖动记录';
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = previous;
+  }
+})());
 
 
 console.log('');
